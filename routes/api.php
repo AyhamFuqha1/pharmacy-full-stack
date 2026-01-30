@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ChequeController;
+use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\ProductBatchController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProductController;
@@ -32,7 +33,17 @@ Route::middleware(['auth:sanctum'])->get('/sales-invoices/{id}',[App\Http\Contro
 //*
 Route::middleware(['auth:sanctum'])->post('/invoice_returns',[App\Http\Controllers\Api\InvoiceReturnController::class,'store']);
 //*
+Route::middleware(['auth:sanctum'])->get('/cheque',[ChequeController::class,'index']);
+Route::middleware(['auth:sanctum'])->get('/cheque/{id}',[ChequeController::class,'show']);
 Route::middleware(['auth:sanctum'])->post('/cheque',[ChequeController::class,'store']);
+Route::middleware(['auth:sanctum'])->post('/cheque/{id}/clear',[ChequeController::class,'clear']);
+Route::middleware(['auth:sanctum'])->post('/cheque/{id}/bounce',[ChequeController::class,'bounce']);
+//*
+Route::middleware(['auth:sanctum'])->get('/customer',[CustomerController::class,'index']);
+Route::middleware(['auth:sanctum'])->get('/customer/{id}',[CustomerController::class,'show']);
+Route::middleware(['auth:sanctum'])->post('/customer',[CustomerController::class,'store']);
+Route::middleware(['auth:sanctum'])->put('/customer/{id}',[CustomerController::class,'update']);
+Route::middleware(['auth:sanctum'])->delete('/customer/{id}',[CustomerController::class,'destroy']);
 
 
 
