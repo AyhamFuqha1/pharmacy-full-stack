@@ -25,6 +25,7 @@ class StoreSalesInvoiceRequest extends FormRequest
             'customer_id' => 'required|exists:customers,id',
             'date' => 'required|date',
             'discount' => 'sometimes|numeric|min:0',
+            'paid_amount'=>'required|numeric|min:0',
             'payment_method' => 'required|in:cash,cheque,visa',
             'items' => 'required|array|min:1',
             'items.*.batch_id' => 'required|exists:product_batches,id',

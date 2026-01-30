@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\ProductBatchController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\ProviderController;
 use App\Http\Controllers\Api\SalesInvoiceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -44,6 +45,17 @@ Route::middleware(['auth:sanctum'])->get('/customer/{id}',[CustomerController::c
 Route::middleware(['auth:sanctum'])->post('/customer',[CustomerController::class,'store']);
 Route::middleware(['auth:sanctum'])->put('/customer/{id}',[CustomerController::class,'update']);
 Route::middleware(['auth:sanctum'])->delete('/customer/{id}',[CustomerController::class,'destroy']);
+Route::middleware(['auth:sanctum'])->post('/customer/{id}',[CustomerController::class,'incrementDept']);
+Route::middleware(['auth:sanctum'])->post('/customer/{id}',[CustomerController::class,'decrementDept']);
+//* 
+Route::middleware(['auth:sanctum'])->get('/providers',[ProviderController::class,'index']);
+Route::middleware(['auth:sanctum'])->get('/providers/{id}',[ProviderController::class,'show']);
+Route::middleware(['auth:sanctum'])->post('/providers',[ProviderController::class,'store']);
+Route::middleware(['auth:sanctum'])->put('/providers/{id}',[ProviderController::class,'update']);
+Route::middleware(['auth:sanctum'])->delete('/providers/{id}',[ProviderController::class,'destroy']);
+Route::middleware(['auth:sanctum'])->post('/providers/{id}/increase-debt',[ProviderController::class,'incrementDept']);
+Route::middleware(['auth:sanctum'])->post('/providers/{id}/decrease-debt',[ProviderController::class,'decrementDept']);
+
 
 
 

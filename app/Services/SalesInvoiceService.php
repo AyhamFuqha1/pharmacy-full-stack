@@ -1,6 +1,7 @@
 <?php
 namespace App\Services;
 
+use App\Http\Controllers\Api\CustomerController;
 use DB;
 use Exception;
 
@@ -43,6 +44,7 @@ class SalesInvoiceService
                 'customer_id' => $request['customer_id'],
                 'user_id' => $user->id,
                 'discount' => $request['discount'],
+                'paid_amount'=>$request['paid_amount'],
                 'payment_method'=>$request['payment_method'],
                 'date' => $request['date']
             ]);
@@ -103,7 +105,7 @@ class SalesInvoiceService
                 'profit' => $total_before - $total_purch - $request['discount'],
 
             ]);
-
+            app(CustomerService::class)->incrementDept($request['customer_id'], $total_before-$request['paid_amount'],$id_sales_invoices);
 
             return true;
 

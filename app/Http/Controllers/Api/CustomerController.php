@@ -56,9 +56,7 @@ class CustomerController extends Controller
         ], 201);
     }
 
-    /**
-     * Display the specified resource.
-     */
+
     public function show($customer)
     {
         try {
@@ -125,4 +123,35 @@ class CustomerController extends Controller
 
         }
     }
+
+    public function incrementDept($id, $amount, $id_sales_invoices)
+    {
+        try {
+            $this->customerService->incrementDept($id, $amount,$id_sales_invoices);
+            return response()->json([
+                'message' => 'dept applied successfully.'
+            ], 200);
+        } catch (Throwable $e) {
+            return response()->json(
+                ["message" => $e->getMessage()],
+                500
+            );
+
+        }
+    }
+
+    public function decrementDept($id, $amount, $id_sales_invoices)
+    {
+        try {
+            $this->customerService->decrementDept($id, $amount, $id_sales_invoices);
+            return response()->json([
+                'message' => 'Payment applied successfully.'
+            ], 200);
+        } catch (Throwable $e) {
+            return response()->json([
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }
