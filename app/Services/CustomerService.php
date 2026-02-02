@@ -19,11 +19,28 @@ class CustomerService
 
     public function store($customer)
     {
-        $customerId = DB::table('customers')->insertGetId([
-            'name' => $customer['name'],
-            'phone_num' => $customer['phone_num'],
-            'city' => $customer['city'],
-        ]);
+        return DB::transaction(function () use ($customer) {
+            $customerId = DB::table('customers')->insertGetId([
+                'name' => $customer['name'],
+                'phone_num' => $customer['phone_num'],
+                'city' => $customer['city'],
+            ]);
+            if ($customer->filled('dept')) {
+                DB::table('ledgers')->insert([
+                    'party_type' => 'supplier',
+                    'party_id' => $customerId,
+                    'transaction_type' => 'debit',
+                    'amount' => $customer->dept,
+                    'source_type' => 'purchase',
+                    'source_id' => 0,
+                    'description' => "Opening balance for customer",
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
+            return true;
+        });
+
     }
 
     public function update($request, $id)
