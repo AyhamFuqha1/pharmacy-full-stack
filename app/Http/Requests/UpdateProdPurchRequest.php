@@ -22,7 +22,24 @@ class UpdateProdPurchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            //
+            'provider_id' => 'sometimes|exists:providers,id',
+            'date' => 'sometimes|date',
+            'due_date' => 'nullable|date|after_or_equal:date',
+
+            'invoice_discount' => 'nullable|numeric|min:0',
+
+            'items' => 'sometimes|array|min:1',
+
+            'items.*.id' => 'nullable|exists:prod_purch,id',
+            'items.*.product_id' => 'sometimes|exists:products,id',
+            'items.*.batch_number' => 'sometimes|string|max:100',
+            'items.*.expire_date' => 'sometimes|date|after:today',
+            'items.*.amount' => 'sometimes|integer|min:1',
+            'items.*.purchase_price' => 'sometimes|numeric|min:0',
+            'items.*.selling_price' => 'sometimes|numeric|min:0',
+            'items.*.item_discount' => 'nullable|numeric|min:0'
         ];
+
+
     }
 }

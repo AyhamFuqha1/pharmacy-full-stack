@@ -120,9 +120,25 @@ class PurchaseInvoiceController extends Controller
             ], 500);
         }
     }
-    public function update(Request $request, PurchaseInvoice $purchaseInvoice)
+    public function update(Request $request, $purchaseInvoice)
     {
-        //
+        try {
+            $user = auth()->user();
+            $res = $this->purchaseInvoiceService->update($request,$purchaseInvoice, $user);
+            if (!$res) {
+                return response()->json([
+                    "message " => $res
+                ], 404);
+            }
+            return response()->json([
+                "message " => $res
+            ], 200);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

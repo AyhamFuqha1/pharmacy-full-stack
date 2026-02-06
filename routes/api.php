@@ -59,7 +59,13 @@ Route::middleware(['auth:sanctum'])->post('/providers/{id}/increase-debt',[Provi
 Route::middleware(['auth:sanctum'])->post('/providers/{id}/decrease-debt',[ProviderController::class,'decrementDept']);
 //*
 Route::middleware(['auth:sanctum'])->post('/purch-invoices',[PurchaseInvoiceController::class,'store']);
-
+Route::middleware(['auth:sanctum'])->post('/purch-invoices/{id}',[PurchaseInvoiceController::class,'post']);
+Route::middleware(['auth:sanctum'])->get('/purch-invoices',[PurchaseInvoiceController::class,'index']);
+Route::middleware(['auth:sanctum'])->get('/purch-invoices/{id}',[PurchaseInvoiceController::class,'show']);
+Route::middleware(['auth:sanctum'])->put('/purch-invoices/{id}',[PurchaseInvoiceController::class,'update']);
+Route::middleware(['auth:sanctum'])->delete('/purch-invoices/{id}',[PurchaseInvoiceController::class,'cancel']);
+//*
+Route::middleware(['auth:sanctum'])->post('/invoice_returns/{id}',[App\Http\Controllers\Api\InvoiceReturnController::class,'purchase']);
 
 
 

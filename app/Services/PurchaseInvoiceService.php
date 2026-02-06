@@ -19,37 +19,38 @@ class PurchaseInvoiceService
 
     public function store($request, $user)
     {
-        DB::transaction(function () use ($request, $user) {
+        return DB::transaction(function () use ($request, $user) {
             $id_purchase_invoices = DB::table('purchase_invoices')->insertGetId([
                 "provider_id" => $request->provider_id,
                 "user_id" => $user->id,
                 'invoice_discount' => $request->invoice_discount,
                 'date' => $request->date,
-                'dute_date' => $request->due_date,
-                'status' => $request->status
+                'due_date' => $request->due_date,
+                'status' => "draft"
             ]);
             $total_before_discount = 0;
             $total_after_discount = 0;
             $items = [];
             foreach ($request->items as $item) {
                 $items[] = [
-                    "product_id" => $item->product_id,
-                    "batch_id" => $item->batch_number,
-                    "amount" => $item->amount,
-                    "expire_date" => $item->expire_date,
-                    "purchase_price" => $item->purchase_price,
-                    "selling_price" => $item->selling_price,
-                    "price" => $item->purchase_price,
-                    "descount" => $item->discount
+                    "purchase_invoice_id" => $id_purchase_invoices,
+                    "product_id" => $item["product_id"],
+                    "batch_number" => $item["batch_number"],
+                    "amount" => $item["amount"],
+                    "expire_date" => $item["expire_date"],
+                    "purchase_price" => $item["purchase_price"],
+                    "selling_price" => $item["selling_price"],
+                    "discount" => $item["item_discount"]
                 ];
-                $total_before_discount += ($item->purchase_price * $item->amount) - $item->discount;
+                $total_before_discount += ($item["purchase_price"] * $item["amount"]) - $item["item_discount"];
             }
+            $total_after_discount = $total_before_discount - $request->invoice_discount;
             DB::table('prod_purch')->insert($items);
             DB::table('purchase_invoices')->where('id', $id_purchase_invoices)->update([
                 "total_before_discount" => $total_before_discount,
                 "total_after_discount" => $total_after_discount,
             ]);
-
+            return true;
         });
     }
 
@@ -65,7 +66,7 @@ class PurchaseInvoiceService
             foreach ($products as $product) {
                 DB::statement("
                 INSERT INTO product_batches
-                (product_id, batch_number, expire_date, purchase_price, selling_price, quantity, created_at)
+                (product_id, batch_number, expiry_date, purchase_price, sale_price, quantity, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE
                     quantity = quantity + VALUES(quantity),
@@ -90,7 +91,7 @@ class PurchaseInvoiceService
                     'created_at' => now()
                 ];
             }
-            DB::table('stocks')->insert($stocks);
+            DB::table('stock')->insert($stocks);
             DB::table('purchase_invoices')->where('id', $id)->update([
 
                 'status' => 'posted'
@@ -111,10 +112,65 @@ class PurchaseInvoiceService
     }
     public function cancel($id, $user)
     {
-      $purchase= DB::table('purchase_invoices')->where('id',$id)->first();
-      if($purchase->status==="draft"){
+        $purchase = DB::table('purchase_invoices')->where('id', $id)->first();
+        if ($purchase->status !== "draft") {
             return false;
-      }
-      DB::table('purcheas_invoices')->where('id',$id)->update(['status'=>"cancelled"]);
+        }
+        DB::table('purchase_invoices')->where('id', $id)->update(['status' => "cancelled"]);
+    }
+
+    public function update($request, $id, $user): mixed
+    {
+        return DB::transaction(function () use ($request, $id, $user) {
+            $purch = DB::table('purchase_invoices')->where('id', $id)->first();
+            if(!$purch || $purch->status!=="draft"){
+                return $purch;
+            }
+            $prod=DB::table("prod_purch")->latest('id')->value('id');
+            //provider_id	user_id	total_before_discount	invoice_discount	total_after_discount	date	due_date	status	created_at	updated_at	
+
+            DB::table('purchase_invoices')->where('id', $id)->update([
+                'provider_id' => $request->provider_id,
+                'updated_by' => $user->id,
+                'due_date' => $request->due_date,
+                'invoice_discount' => $request->invoice_discount
+            ]);
+            $items = [];
+            $lastId=$prod;
+            $total_before_discount = 0;
+            $total_after_discount = 0;
+            foreach ($request->items as $item) {
+                $items[] = [
+                    'id' => $item['id'] ?? ++$lastId,
+                    'purchase_invoice_id' => $id,
+                    'product_id' => $item['product_id'],
+                    'batch_number' => $item['batch_number'],
+                    'amount' => $item['amount'],
+                    'purchase_price' => $item['purchase_price'],
+                    'selling_price' => $item['selling_price'],
+                    'discount' => $item['item_discount'] ?? 0,
+                ];
+                $total_before_discount += ($item["purchase_price"] * $item["amount"]) - $item["item_discount"];
+
+            }
+            $total_after_discount = $total_before_discount - $request->invoice_discount;
+            DB::table('purchase_invoices')->where('id', $id)->update([
+                "total_before_discount" => $total_before_discount,
+                "total_after_discount" => $total_after_discount,
+            ]);
+            DB::table('prod_purch')->upsert(
+                $items,
+                ['id'],
+                ['amount', 'purchase_price', 'selling_price', 'discount', 'batch_number', 'product_id']
+            );
+            $ids = collect($items)
+                ->pluck('id')
+                ->filter()
+                ->toArray();
+          //  return $ids;
+            DB::table('prod_purch')->where('purchase_invoice_id', $id)->whereNotIn('id', $ids)->delete();
+            return true;
+        });
     }
 }
+
