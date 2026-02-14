@@ -2,12 +2,15 @@
 
 use App\Http\Controllers\Api\ChequeController;
 use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\ExpressController;
+use App\Http\Controllers\Api\PaymentVoucherController;
 use App\Http\Controllers\Api\ProductBatchController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProviderController;
 use App\Http\Controllers\Api\PurchaseInvoiceController;
 use App\Http\Controllers\Api\SalesInvoiceController;
+use App\Http\Controllers\ReceiptVouchersController;
 use App\Models\PurchaseInvoice;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -66,6 +69,19 @@ Route::middleware(['auth:sanctum'])->put('/purch-invoices/{id}',[PurchaseInvoice
 Route::middleware(['auth:sanctum'])->delete('/purch-invoices/{id}',[PurchaseInvoiceController::class,'cancel']);
 //*
 Route::middleware(['auth:sanctum'])->post('/invoice_returns/{id}',[App\Http\Controllers\Api\InvoiceReturnController::class,'purchase']);
-
-
-
+//*
+Route::middleware(['auth:sanctum'])->get('/payment-vouchers',[PaymentVoucherController::class,'index']);
+Route::middleware(['auth:sanctum'])->get('/payment-vouchers/{id}',[PaymentVoucherController::class,'show']);
+Route::middleware(['auth:sanctum'])->post('/payment-vouchers',[PaymentVoucherController::class,'store']);
+Route::middleware(['auth:sanctum'])->delete('/payment-vouchers',[PaymentVoucherController::class,'cancel']);
+//*
+Route::middleware(['auth:sanctum'])->get('/receipt-vouchers',[ReceiptVouchersController::class,'index']);
+Route::middleware(['auth:sanctum'])->get('/receipt-vouchers/{id}',[ReceiptVouchersController::class,'show']);
+Route::middleware(['auth:sanctum'])->post('/receipt-vouchers',[ReceiptVouchersController::class,'store']);
+Route::middleware(['auth:sanctum'])->delete('/receipt-vouchers',[ReceiptVouchersController::class,'cancel']);
+//*
+Route::middleware(['auth:sanctum'])->get('/express',[ExpressController::class,'index']);
+Route::middleware(['auth:sanctum'])->get('/express/{id}',[ExpressController::class,'show']);
+Route::middleware(['auth:sanctum'])->post('/express',[ExpressController::class,'store']);
+Route::middleware(['auth:sanctum'])->delete('/express',[ExpressController::class,'destroy']);
+//*

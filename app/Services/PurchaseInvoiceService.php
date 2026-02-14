@@ -66,8 +66,8 @@ class PurchaseInvoiceService
             foreach ($products as $product) {
                 DB::statement("
                 INSERT INTO product_batches
-                (product_id, batch_number, expiry_date, purchase_price, sale_price, quantity, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, NOW())
+                (product_id, batch_number, expiry_date, purchase_price, sale_price,initial_quantity, quantity, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE
                     quantity = quantity + VALUES(quantity),
                      id = LAST_INSERT_ID(id)
@@ -77,6 +77,7 @@ class PurchaseInvoiceService
                     $product->expire_date,
                     $product->purchase_price,
                     $product->selling_price,
+                    $product->amount,
                     $product->amount
                 ]);
 
