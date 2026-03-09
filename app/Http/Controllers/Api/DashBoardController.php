@@ -1,49 +1,34 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use App\Models\DashBoard;
+use App\Services\DashBoardService;
 use Illuminate\Http\Request;
+use Throwable;
 
 class DashBoardController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
+    private DashBoardService $dashBoardService;
+    public function __construct(DashBoardService $dashBoardService)
+    {
+        $this->dashBoardService = $dashBoardService;
+    }
+
+
     public function index()
     {
-        //
+        try {
+           $res=$this->dashBoardService->index();
+        } catch (Throwable $e) {
+            return response()->json(
+                ["message" => $e->getMessage()],
+                500
+            );
+
+        }
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request)
-    {
-        //
-    }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(DashBoard $dashBoard)
-    {
-        //
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, DashBoard $dashBoard)
-    {
-        //
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(DashBoard $dashBoard)
-    {
-        //
-    }
 }

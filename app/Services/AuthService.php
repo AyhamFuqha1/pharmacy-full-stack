@@ -42,7 +42,8 @@ class AuthService
     public function register($data, $admin)
     {
         return DB::transaction(function () use ($data, $admin) {
-            $tempPassword = random_int(10000000, 99999999);
+           // $tempPassword = random_int(10000000, 99999999);
+            $tempPassword = 123456;
             $userId = DB::table('users')->insertGetId(['name' => $data->name, 'email' => $data->email, 'password' => Hash::make($tempPassword), 'role' => $data->role, 'force_change_password' => true]);
             DB::table('audit_logs')->insert([
                 'user_id' => $admin->id,
