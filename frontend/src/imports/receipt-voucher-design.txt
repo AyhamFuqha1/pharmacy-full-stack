@@ -1,0 +1,71 @@
+2️⃣ 🧾 Official Receipt Voucher Page (سند قبض رسمي احترافي)
+Figma AI Prompt
+
+Title: Receipt Voucher – Professional Accounting Document
+
+Style:
+
+Clean printable layout
+
+Minimal but professional
+
+Pharmacy brand header
+
+Suitable for A4 & thermal printing
+
+Layout
+Header
+
+Logo
+
+Pharmacy Name
+
+Address
+
+Contact Info
+
+Receipt Number
+
+Date
+
+Customer Info Section
+
+Customer Name
+
+Phone
+
+Account Balance Before Payment
+
+Payment Details Section
+
+Payment Method
+
+Amount
+
+Reference (Cheque / Bank ref)
+
+Linked Invoice
+
+Summary Box (Right Side)
+
+Paid Amount
+
+Remaining Balance
+
+Footer
+
+Signature Line
+
+Notes
+
+QR Code (optional)
+
+UX Notes
+
+Printable mode
+
+Clean typography
+
+Branded color accents (#0D7D6D)
+
+Professional accounting feel
