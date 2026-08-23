@@ -28,7 +28,7 @@ class UserPolicy
      */
     public function create(User $user): bool
     {
-         return  $user->role === 1;
+        return $user->role === User::ROLE_ADMINISTRATOR;
     }
 
     /**

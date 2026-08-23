@@ -19,69 +19,72 @@ Route::get('/user', function (Request $request) {return $request->user();})->mid
 Route::post('/login', [AuthController::class, 'login']);
 Route::middleware(['auth:sanctum'])->post('/register', [AuthController::class, 'register']);
 Route::middleware(['auth:sanctum'])->post('/logout', [AuthController::class, 'logout']);
+Route::middleware(['auth:sanctum'])->post('/change-password', [AuthController::class, 'changePassword']);
 //*
-Route::middleware(['auth:sanctum'])->get('/product', [ProductController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/product/{product}', [ProductController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/product', [ProductController::class,'store']);
-Route::middleware(['auth:sanctum'])->put('/product/{product}', [ProductController::class,'update']);
-Route::middleware(['auth:sanctum'])->delete('/product/{product}', [ProductController::class,'destroy']);
-//*
-Route::middleware(['auth:sanctum'])->get('/batch', [ProductBatchController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/batch/{id}', [ProductBatchController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/batch', [ProductBatchController::class,'store']);
-Route::middleware(['auth:sanctum'])->put('/batch/{id}', [ProductBatchController::class,'update']);
-Route::middleware(['auth:sanctum'])->delete('/batch/{id}', [ProductBatchController::class,'destroy']);
-//*
-Route::middleware(['auth:sanctum'])->post('/sales-invoices',[SalesInvoiceController::class,'store']);
-Route::middleware(['auth:sanctum'])->delete('/sales-invoices/{id}/cancel',[SalesInvoiceController::class,'cancel']);
-Route::middleware(['auth:sanctum'])->get('/sales-invoices',[SalesInvoiceController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/sales-invoices/{id}',[SalesInvoiceController::class,'show']);
-//*
-Route::middleware(['auth:sanctum'])->post('/invoice_returns',[App\Http\Controllers\Api\InvoiceReturnController::class,'store']);
-//*
-Route::middleware(['auth:sanctum'])->get('/cheque',[ChequeController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/cheque/{id}',[ChequeController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/cheque',[ChequeController::class,'store']);
-Route::middleware(['auth:sanctum'])->post('/cheque/{id}/clear',[ChequeController::class,'clear']);
-Route::middleware(['auth:sanctum'])->post('/cheque/{id}/bounce',[ChequeController::class,'bounce']);
-//*
-Route::middleware(['auth:sanctum'])->get('/customer',[CustomerController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/customer/{id}',[CustomerController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/customer',[CustomerController::class,'store']);
-Route::middleware(['auth:sanctum'])->put('/customer/{id}',[CustomerController::class,'update']);
-Route::middleware(['auth:sanctum'])->delete('/customer/{id}',[CustomerController::class,'destroy']);
-Route::middleware(['auth:sanctum'])->post('/customer/{id}',[CustomerController::class,'incrementDept']);
-Route::middleware(['auth:sanctum'])->post('/customer/{id}',[CustomerController::class,'decrementDept']);
-//* 
-Route::middleware(['auth:sanctum'])->get('/providers',[ProviderController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/providers/{id}',[ProviderController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/providers',[ProviderController::class,'store']);
-Route::middleware(['auth:sanctum'])->put('/providers/{id}',[ProviderController::class,'update']);
-Route::middleware(['auth:sanctum'])->delete('/providers/{id}',[ProviderController::class,'destroy']);
-Route::middleware(['auth:sanctum'])->post('/providers/{id}/increase-debt',[ProviderController::class,'incrementDept']);
-Route::middleware(['auth:sanctum'])->post('/providers/{id}/decrease-debt',[ProviderController::class,'decrementDept']);
-//*
-Route::middleware(['auth:sanctum'])->post('/purch-invoices',[PurchaseInvoiceController::class,'store']);
-Route::middleware(['auth:sanctum'])->post('/purch-invoices/{id}',[PurchaseInvoiceController::class,'post']);
-Route::middleware(['auth:sanctum'])->get('/purch-invoices',[PurchaseInvoiceController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/purch-invoices/{id}',[PurchaseInvoiceController::class,'show']);
-Route::middleware(['auth:sanctum'])->put('/purch-invoices/{id}',[PurchaseInvoiceController::class,'update']);
-Route::middleware(['auth:sanctum'])->delete('/purch-invoices/{id}',[PurchaseInvoiceController::class,'cancel']);
-//*
-Route::middleware(['auth:sanctum'])->post('/invoice_returns/{id}',[App\Http\Controllers\Api\InvoiceReturnController::class,'purchase']);
-//*
-Route::middleware(['auth:sanctum'])->get('/payment-vouchers',[PaymentVoucherController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/payment-vouchers/{id}',[PaymentVoucherController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/payment-vouchers',[PaymentVoucherController::class,'store']);
-Route::middleware(['auth:sanctum'])->delete('/payment-vouchers',[PaymentVoucherController::class,'cancel']);
-//*
-Route::middleware(['auth:sanctum'])->get('/receipt-vouchers',[ReceiptVouchersController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/receipt-vouchers/{id}',[ReceiptVouchersController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/receipt-vouchers',[ReceiptVouchersController::class,'store']);
-Route::middleware(['auth:sanctum'])->delete('/receipt-vouchers',[ReceiptVouchersController::class,'cancel']);
-//*
-Route::middleware(['auth:sanctum'])->get('/express',[ExpressController::class,'index']);
-Route::middleware(['auth:sanctum'])->get('/express/{id}',[ExpressController::class,'show']);
-Route::middleware(['auth:sanctum'])->post('/express',[ExpressController::class,'store']);
-Route::middleware(['auth:sanctum'])->delete('/express',[ExpressController::class,'destroy']);
+Route::middleware(['auth:sanctum', 'password.must-change'])->group(function () {
+    Route::get('/product', [ProductController::class,'index']);
+    Route::get('/product/{product}', [ProductController::class,'show']);
+    Route::post('/product', [ProductController::class,'store']);
+    Route::put('/product/{product}', [ProductController::class,'update']);
+    Route::delete('/product/{product}', [ProductController::class,'destroy']);
+    //*
+    Route::get('/batch', [ProductBatchController::class,'index']);
+    Route::get('/batch/{id}', [ProductBatchController::class,'show']);
+    Route::post('/batch', [ProductBatchController::class,'store']);
+    Route::put('/batch/{id}', [ProductBatchController::class,'update']);
+    Route::delete('/batch/{id}', [ProductBatchController::class,'destroy']);
+    //*
+    Route::post('/sales-invoices',[SalesInvoiceController::class,'store']);
+    Route::delete('/sales-invoices/{id}/cancel',[SalesInvoiceController::class,'cancel']);
+    Route::get('/sales-invoices',[SalesInvoiceController::class,'index']);
+    Route::get('/sales-invoices/{id}',[SalesInvoiceController::class,'show']);
+    //*
+    Route::post('/invoice_returns',[App\Http\Controllers\Api\InvoiceReturnController::class,'store']);
+    //*
+    Route::get('/cheque',[ChequeController::class,'index']);
+    Route::get('/cheque/{id}',[ChequeController::class,'show']);
+    Route::post('/cheque',[ChequeController::class,'store']);
+    Route::post('/cheque/{id}/clear',[ChequeController::class,'clear']);
+    Route::post('/cheque/{id}/bounce',[ChequeController::class,'bounce']);
+    //*
+    Route::get('/customer',[CustomerController::class,'index']);
+    Route::get('/customer/{id}',[CustomerController::class,'show']);
+    Route::post('/customer',[CustomerController::class,'store']);
+    Route::put('/customer/{id}',[CustomerController::class,'update']);
+    Route::delete('/customer/{id}',[CustomerController::class,'destroy']);
+    Route::post('/customer/{id}',[CustomerController::class,'incrementDept']);
+    Route::post('/customer/{id}',[CustomerController::class,'decrementDept']);
+    //* 
+    Route::get('/providers',[ProviderController::class,'index']);
+    Route::get('/providers/{id}',[ProviderController::class,'show']);
+    Route::post('/providers',[ProviderController::class,'store']);
+    Route::put('/providers/{id}',[ProviderController::class,'update']);
+    Route::delete('/providers/{id}',[ProviderController::class,'destroy']);
+    Route::post('/providers/{id}/increase-debt',[ProviderController::class,'incrementDept']);
+    Route::post('/providers/{id}/decrease-debt',[ProviderController::class,'decrementDept']);
+    //*
+    Route::post('/purch-invoices',[PurchaseInvoiceController::class,'store']);
+    Route::post('/purch-invoices/{id}',[PurchaseInvoiceController::class,'post']);
+    Route::get('/purch-invoices',[PurchaseInvoiceController::class,'index']);
+    Route::get('/purch-invoices/{id}',[PurchaseInvoiceController::class,'show']);
+    Route::put('/purch-invoices/{id}',[PurchaseInvoiceController::class,'update']);
+    Route::delete('/purch-invoices/{id}',[PurchaseInvoiceController::class,'cancel']);
+    //*
+    Route::post('/invoice_returns/{id}',[App\Http\Controllers\Api\InvoiceReturnController::class,'purchase']);
+    //*
+    Route::get('/payment-vouchers',[PaymentVoucherController::class,'index']);
+    Route::get('/payment-vouchers/{id}',[PaymentVoucherController::class,'show']);
+    Route::post('/payment-vouchers',[PaymentVoucherController::class,'store']);
+    Route::delete('/payment-vouchers',[PaymentVoucherController::class,'cancel']);
+    //*
+    Route::get('/receipt-vouchers',[ReceiptVouchersController::class,'index']);
+    Route::get('/receipt-vouchers/{id}',[ReceiptVouchersController::class,'show']);
+    Route::post('/receipt-vouchers',[ReceiptVouchersController::class,'store']);
+    Route::delete('/receipt-vouchers',[ReceiptVouchersController::class,'cancel']);
+    //*
+    Route::get('/express',[ExpressController::class,'index']);
+    Route::get('/express/{id}',[ExpressController::class,'show']);
+    Route::post('/express',[ExpressController::class,'store']);
+    Route::delete('/express',[ExpressController::class,'destroy']);
+});
 //*

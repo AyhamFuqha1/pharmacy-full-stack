@@ -25,7 +25,7 @@ class RegisterRequest extends FormRequest
         return [
             'name' => 'required|min:3|max:255',
             'email' => 'required|email|unique:users,email',
-            'role' => 'required|integer|exists:roles,id'
+            'role' => ['required', 'integer', 'in:1,2', 'exists:roles,id']
         ];
     }
 }
