@@ -13,70 +13,76 @@ class ProductService
 
     public function index()
     {
-        $prducts = Product::all();
-        return $prducts;
+        return Product::query()->whereNull('deleted_at')->get();
     }
 
 
     public function store($request)
     {
         $data = $request->validated();
+
         if ($request->hasFile('img')) {
             $data['img'] = $request->file('img')->store('products', 'public');
         }
-        $product_id = DB::table('products')->insertGetId($data);
-        return $product_id;
+
+        $product = Product::query()->create($data);
+
+        return $product->fresh();
     }
 
     public function show($id_product)
     {
-        $product = DB::table('products')->where('id', $id_product)->first();
-        return $product;
+        return Product::query()->whereNull('deleted_at')->where('id', $id_product)->first();
     }
 
 
     public function update($request, $id_product)
     {
+        $product = Product::withTrashed()->find($id_product);
 
-        $product = DB::table('products')->where('id', $id_product)->first();
-        
-        if (!$product) {
+        if (!$product || $product->deleted_at !== null) {
             return false;
-        };
-        $data = $request->validated();
-        if ($request->hasFile('img')) {
-            if (Storage::disk('public')->exists($product->img)) {
-                Storage::disk('public')->delete($product->img);
-                }
-                $data['img'] = $request->file('img')->store('products', 'public');
         }
-            DB::table('products')->where('id', $id_product)->update($data);
-            return true;
-        
+
+        $data = $request->validated();
+
+        if ($request->hasFile('img')) {
+            if ($product->img && Storage::disk('public')->exists($product->img)) {
+                Storage::disk('public')->delete($product->img);
+            }
+            $data['img'] = $request->file('img')->store('products', 'public');
+        }
+
+        $product->fill($data);
+        $product->save();
+
+        return $product->fresh();
     }
 
 
     public function destroy($product)
     {
-        $prod = DB::table('products')->where('id', $product)->first();
+        $prod = Product::withTrashed()->find($product);
+
         if (!$prod) {
             return [
                 "message" => "this Product Not Found",
                 "status" => 404
             ];
-        } else {
-            if ($prod->deleted_at != null) {
-                return [
-                    "message" => "this Product is already deleted",
-                    "status" => 409
-                ];
-            }
+        }
 
-            DB::table('products')->where('id', $product)->update(["deleted_at" => now()]);
+        if ($prod->deleted_at !== null) {
             return [
-                "message" => "deleted Secssfuled",
-                "status" => 200
+                "message" => "this Product is already deleted",
+                "status" => 409
             ];
         }
+
+        $prod->delete();
+
+        return [
+            "message" => "deleted Secssfuled",
+            "status" => 200
+        ];
     }
 }

@@ -48,10 +48,10 @@ class ProductController extends Controller
 
     public function store(StoreProductRequest $request)
     {
-        $this->productService->store($request);
-          return response()->json([
+        $product = $this->productService->store($request);
+        return response()->json([
             'message' => 'Created',
-            'data' => $request
+            'data' => $product
         ], 201);
     }
 
@@ -83,10 +83,10 @@ class ProductController extends Controller
 
     public function update(updateaProductRequest $request,$product)
     {
-     
+
         try {
             $products = $this->productService->update($request, $product);
-           
+
             if (!$products) {
                 return response()->json(
                     ["message" => "This Product Not Found"],
