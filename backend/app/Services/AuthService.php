@@ -60,6 +60,7 @@ class AuthService
                 'email' => $data->email,
                 'password' => Hash::make($tempPassword),
                 'role' => $data->role,
+                'branch_id' => $data->branch_id ?? null,
                 'force_change_password' => true,
             ]);
 

@@ -20,7 +20,7 @@ class DashBoardController extends Controller
     public function index()
     {
         try {
-           $res=$this->dashBoardService->index();
+               return response()->json($this->dashBoardService->index());
         } catch (Throwable $e) {
             return response()->json(
                 ["message" => $e->getMessage()],

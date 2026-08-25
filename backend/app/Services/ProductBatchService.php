@@ -7,9 +7,17 @@ use Illuminate\Http\Request;
 class ProductBatchService
 {
 
-    public function index()
+    public function index($request = null)
     {
-        return ProductBatch::all();
+        $query = ProductBatch::query()->with('product');
+        if ($request?->filled('search')) {
+            $query->where('batch_number', 'like', '%' . $request->search . '%');
+        }
+        if ($request?->filled('product_id')) {
+            $query->where('product_id', $request->product_id);
+        }
+        $sort = in_array($request?->get('sort'), ['expiry_date', 'quantity', 'created_at'], true) ? $request->get('sort') : 'expiry_date';
+        return $query->orderBy($sort, $request?->get('direction') === 'desc' ? 'desc' : 'asc')->paginate(min((int) ($request?->get('per_page') ?? 15), 100));
     }
 
 
@@ -46,20 +54,26 @@ class ProductBatchService
                 "message" => "this Product Not Found",
                 "status" => 404
             ];
-        } else {
-            if ($prod->deleted_at != null) {
-                return [
-                    "message" => "this Product is already deleted",
-                    "status" => 409
-                ];
-            }
+        }
 
-            DB::table('product_batches')->where('id', $productBatch)->update(["deleted_at" => now()]);
+        if ($prod->deleted_at != null) {
             return [
-                "message" => "deleted Successed",
-                "status" => 200
+                "message" => "this Product is already deleted",
+                "status" => 409
             ];
         }
 
+        if ((int) $prod->quantity > 0) {
+            return [
+                "message" => "Batch cannot be deleted while stock remains.",
+                "status" => 422
+            ];
+        }
+
+        DB::table('product_batches')->where('id', $productBatch)->update(["deleted_at" => now()]);
+        return [
+            "message" => "deleted Successed",
+            "status" => 200
+        ];
     }
 }

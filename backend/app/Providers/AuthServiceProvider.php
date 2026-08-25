@@ -14,6 +14,8 @@ class AuthServiceProvider extends ServiceProvider
 
     protected $policies = [
         \App\Models\User::class => \App\Policies\UserPolicy::class,
+        \App\Models\Product::class => \App\Policies\ProductPolicy::class,
+        \App\Models\ProductBatch::class => \App\Policies\ProductBatchPolicy::class,
     ];
     public function register(): void
     {

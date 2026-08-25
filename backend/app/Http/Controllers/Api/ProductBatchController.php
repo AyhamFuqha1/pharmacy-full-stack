@@ -13,9 +13,9 @@ class ProductBatchController extends Controller
     {
         $this->ProductBatchService = $ProductBatchService;
     }
-    public function index()
+    public function index(\Illuminate\Http\Request $request)
     {
-        $result = $this->ProductBatchService->index();
+        $result = $this->ProductBatchService->index($request);
         if (!$result) {
             return response()->json(
                 ["  message" => "Not Contant"],

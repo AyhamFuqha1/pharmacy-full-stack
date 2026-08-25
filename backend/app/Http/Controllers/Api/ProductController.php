@@ -20,10 +20,10 @@ class ProductController extends Controller
         $this->productService = $productService;
     }
 
-    public function index()
+    public function index(Request $request)
     {
         try {
-            $products = $this->productService->index();
+            $products = $this->productService->index($request);
             if (!$products) {
                 return response()->json(
                     ["message" => "No Product"]
@@ -78,6 +78,17 @@ class ProductController extends Controller
             );
 
         }
+    }
+
+    public function scanBarcode(string $barcode)
+    {
+        $result = $this->productService->lookupByBarcode($barcode);
+
+        if (!$result) {
+            return response()->json(['message' => 'Product not found for this barcode.'], 404);
+        }
+
+        return response()->json($result);
     }
 
 

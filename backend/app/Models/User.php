@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 
 class User extends Authenticatable
@@ -27,6 +28,7 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'branch_id',
         'force_change_password'
     ];
 
@@ -51,5 +53,21 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    public function roleRelation(): BelongsTo
+    {
+        return $this->belongsTo(Role::class, 'role');
+    }
+
+    public function hasPermission(string $permission): bool
+    {
+        return (int) $this->role === self::ROLE_ADMINISTRATOR
+            || $this->roleRelation()->whereHas('permissions', fn ($query) => $query->where('name', $permission))->exists();
+    }
+
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'branch_id');
     }
 }
