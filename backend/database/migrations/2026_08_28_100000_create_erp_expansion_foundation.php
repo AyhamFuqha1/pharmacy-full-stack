@@ -1,0 +1,69 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Schema::create('units', function (Blueprint $t) { $t->id(); $t->string('name')->unique(); $t->string('symbol', 20)->unique(); $t->timestamps(); });
+        Schema::table('products', function (Blueprint $t) {
+            $t->foreignId('base_unit_id')->nullable()->constrained('units')->nullOnDelete();
+            $t->decimal('minimum_stock', 14, 3)->default(0); $t->decimal('reorder_level', 14, 3)->default(0); $t->decimal('reorder_quantity', 14, 3)->default(0);
+        });
+        Schema::create('product_units', function (Blueprint $t) {
+            $t->id(); $t->foreignId('product_id')->constrained()->cascadeOnDelete(); $t->foreignId('unit_id')->constrained()->restrictOnDelete();
+            $t->decimal('base_quantity', 14, 3); $t->decimal('sale_price', 14, 2)->nullable(); $t->boolean('is_purchase_unit')->default(false); $t->boolean('is_sale_unit')->default(false); $t->boolean('is_active')->default(true); $t->timestamps(); $t->unique(['product_id','unit_id']);
+        });
+        Schema::table('customers', function (Blueprint $t) { $t->decimal('credit_limit', 14, 2)->nullable(); $t->decimal('credit_warning_threshold', 14, 2)->nullable(); $t->boolean('block_on_limit')->default(false); });
+        Schema::table('product_batches', function (Blueprint $t) {
+            $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->string('inventory_state')->default('available')->index();
+            $t->text('state_reason')->nullable(); $t->foreignId('state_changed_by')->nullable()->constrained('users')->nullOnDelete(); $t->timestamp('state_changed_at')->nullable();
+        });
+        Schema::table('product_batches', function (Blueprint $t) {
+            $t->dropUnique('product_batches_identity_unique');
+            $t->unique(['product_id','branch_id','batch_number','expiry_date'], 'product_batches_branch_identity_unique');
+        });
+        Schema::table('stock', function (Blueprint $t) { $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->decimal('unit_cost', 14, 4)->nullable(); $t->string('disposition')->nullable(); });
+        Schema::table('prod_sales', function (Blueprint $t) {
+            $t->foreignId('transaction_unit_id')->nullable()->constrained('units')->nullOnDelete(); $t->decimal('transaction_quantity', 14, 3)->nullable(); $t->decimal('base_quantity', 14, 3)->nullable();
+            $t->decimal('original_unit_price', 14, 2)->nullable(); $t->decimal('applied_unit_price', 14, 2)->nullable(); $t->string('discount_reason')->nullable(); $t->boolean('price_overridden')->default(false);
+            $t->string('discount_type')->nullable(); $t->decimal('discount_value',14,2)->nullable(); $t->foreignId('override_actor_id')->nullable()->constrained('users')->nullOnDelete(); $t->text('override_reason')->nullable();
+        });
+        Schema::table('prod_purch', function (Blueprint $t) { $t->foreignId('transaction_unit_id')->nullable()->constrained('units')->nullOnDelete(); $t->decimal('transaction_quantity',14,3)->nullable(); $t->decimal('conversion_factor',14,3)->nullable(); $t->decimal('base_quantity',14,3)->nullable(); });
+        Schema::table('expenses', function (Blueprint $t) { $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->foreignId('expense_account_id')->nullable()->constrained('accounts')->nullOnDelete(); $t->string('payment_method')->nullable(); $t->string('description')->nullable(); $t->string('external_reference')->nullable(); });
+        foreach (['sales_invoices'=>'SAL','purchase_invoices'=>'PUR','invoice_returns'=>'SRET','purch_returns'=>'PRET','receipt_vouchers'=>'REC','payment_vouchers'=>'PAY','expenses'=>'EXP'] as $table => $prefix) {
+            Schema::table($table, fn (Blueprint $t) => $t->string('document_number')->nullable()->unique());
+        }
+        Schema::create('document_sequences', function (Blueprint $t) { $t->id(); $t->string('document_type'); $t->unsignedSmallInteger('year'); $t->unsignedBigInteger('last_number')->default(0); $t->unique(['document_type','year']); });
+        Schema::create('opening_balance_sessions', function (Blueprint $t) { $t->id(); $t->string('document_number')->unique(); $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->date('effective_date'); $t->string('status')->default('draft'); $t->text('notes')->nullable(); $t->foreignId('created_by')->constrained('users'); $t->foreignId('posted_by')->nullable()->constrained('users')->nullOnDelete(); $t->timestamp('validated_at')->nullable(); $t->timestamp('posted_at')->nullable(); $t->timestamps(); $t->unique(['branch_id','effective_date']); });
+        Schema::create('opening_balance_lines', function (Blueprint $t) { $t->id(); $t->foreignId('session_id')->constrained('opening_balance_sessions')->cascadeOnDelete(); $t->string('type'); $t->foreignId('product_id')->nullable()->constrained()->nullOnDelete(); $t->foreignId('batch_id')->nullable()->constrained('product_batches')->nullOnDelete(); $t->foreignId('customer_id')->nullable()->constrained()->nullOnDelete(); $t->foreignId('provider_id')->nullable()->constrained()->nullOnDelete(); $t->string('batch_number')->nullable(); $t->date('expiry_date')->nullable(); $t->decimal('quantity',14,3)->nullable(); $t->decimal('unit_cost',14,4)->nullable(); $t->decimal('sale_price',14,2)->nullable(); $t->decimal('amount',14,2)->nullable(); $t->json('metadata')->nullable(); $t->timestamps(); });
+        Schema::create('stock_counts', function (Blueprint $t) { $t->id(); $t->string('document_number')->unique(); $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->string('scope')->default('selected'); $t->string('status')->default('draft'); $t->foreignId('created_by')->constrained('users'); $t->foreignId('posted_by')->nullable()->constrained('users')->nullOnDelete(); $t->timestamp('snapshot_at')->nullable(); $t->timestamp('posted_at')->nullable(); $t->text('notes')->nullable(); $t->timestamps(); });
+        Schema::create('stock_count_lines', function (Blueprint $t) { $t->id(); $t->foreignId('stock_count_id')->constrained()->cascadeOnDelete(); $t->foreignId('product_id')->constrained(); $t->foreignId('batch_id')->constrained('product_batches'); $t->decimal('system_quantity',14,3); $t->decimal('counted_quantity',14,3)->nullable(); $t->decimal('difference',14,3)->nullable(); $t->string('reason')->nullable(); $t->text('note')->nullable(); $t->unique(['stock_count_id','batch_id']); });
+        Schema::create('stock_adjustments', function (Blueprint $t) { $t->id(); $t->string('document_number')->unique(); $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->foreignId('product_id')->constrained(); $t->foreignId('batch_id')->constrained('product_batches'); $t->decimal('quantity',14,3); $t->string('reason'); $t->text('note')->nullable(); $t->decimal('unit_cost',14,4); $t->foreignId('user_id')->constrained(); $t->timestamp('posted_at'); $t->timestamps(); });
+        Schema::create('stock_transfers', function (Blueprint $t) { $t->id(); $t->string('document_number')->unique(); $t->foreignId('source_branch_id')->constrained('branches'); $t->foreignId('destination_branch_id')->constrained('branches'); $t->string('status')->default('draft'); $t->foreignId('created_by')->constrained('users'); $t->foreignId('sent_by')->nullable()->constrained('users')->nullOnDelete(); $t->foreignId('received_by')->nullable()->constrained('users')->nullOnDelete(); $t->timestamp('sent_at')->nullable(); $t->timestamp('received_at')->nullable(); $t->timestamp('cancelled_at')->nullable(); $t->text('notes')->nullable(); $t->timestamps(); });
+        Schema::create('stock_transfer_lines', function (Blueprint $t) { $t->id(); $t->foreignId('transfer_id')->constrained('stock_transfers')->cascadeOnDelete(); $t->foreignId('product_id')->constrained(); $t->foreignId('source_batch_id')->constrained('product_batches'); $t->foreignId('destination_batch_id')->nullable()->constrained('product_batches')->nullOnDelete(); $t->decimal('quantity',14,3); $t->decimal('unit_cost',14,4); $t->string('batch_number'); $t->date('expiry_date'); });
+        Schema::create('batch_recalls', function (Blueprint $t) { $t->id(); $t->foreignId('product_id')->constrained(); $t->foreignId('batch_id')->constrained('product_batches'); $t->string('reason'); $t->dateTime('issued_at'); $t->string('status')->default('active'); $t->text('notes')->nullable(); $t->foreignId('actor_id')->constrained('users'); $t->timestamp('resolved_at')->nullable(); $t->timestamps(); });
+        Schema::create('cashier_shifts', function (Blueprint $t) { $t->id(); $t->foreignId('cashier_id')->constrained('users'); $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->string('status')->default('open'); $t->decimal('opening_cash',14,2); $t->decimal('expected_cash',14,2)->nullable(); $t->decimal('counted_cash',14,2)->nullable(); $t->decimal('difference',14,2)->nullable(); $t->timestamp('opened_at'); $t->timestamp('closed_at')->nullable(); $t->text('notes')->nullable(); $t->timestamps(); });
+        Schema::create('bank_reconciliations', function (Blueprint $t) { $t->id(); $t->foreignId('account_id')->constrained('accounts'); $t->string('source_type'); $t->unsignedBigInteger('source_id'); $t->boolean('reconciled')->default(false); $t->timestamp('reconciled_at')->nullable(); $t->foreignId('reconciled_by')->nullable()->constrained('users')->nullOnDelete(); $t->string('external_reference')->nullable(); $t->text('note')->nullable(); $t->timestamps(); $t->unique(['source_type','source_id']); });
+        Schema::create('saved_reports', function (Blueprint $t) { $t->id(); $t->foreignId('owner_id')->constrained('users')->cascadeOnDelete(); $t->string('name'); $t->string('report_key'); $t->json('filters')->nullable(); $t->string('sort')->nullable(); $t->string('direction')->nullable(); $t->json('visible_columns')->nullable(); $t->boolean('is_shared')->default(false); $t->timestamps(); });
+        Schema::create('attachments', function (Blueprint $t) { $t->id(); $t->string('attachable_type'); $t->unsignedBigInteger('attachable_id'); $t->string('disk'); $t->string('storage_key'); $t->string('original_name'); $t->string('mime_type'); $t->unsignedBigInteger('size'); $t->string('checksum',64); $t->foreignId('uploaded_by')->constrained('users'); $t->timestamps(); $t->index(['attachable_type','attachable_id']); });
+        Schema::create('import_jobs', function (Blueprint $t) { $t->id(); $t->foreignId('user_id')->constrained(); $t->string('domain'); $t->string('status')->default('preview'); $t->json('rows'); $t->json('errors')->nullable(); $t->timestamp('confirmed_at')->nullable(); $t->timestamps(); });
+        Schema::create('backup_runs', function (Blueprint $t) { $t->id(); $t->foreignId('requested_by')->constrained('users'); $t->string('status')->default('requested'); $t->timestamp('requested_at'); $t->timestamp('completed_at')->nullable(); $t->unsignedBigInteger('size')->nullable(); $t->string('storage_reference')->nullable(); $t->string('checksum',64)->nullable(); $t->text('error')->nullable(); $t->timestamps(); });
+        Schema::create('other_incomes', function (Blueprint $t) { $t->id(); $t->string('document_number')->unique(); $t->date('date'); $t->foreignId('branch_id')->nullable()->constrained()->nullOnDelete(); $t->foreignId('account_id')->constrained('accounts'); $t->decimal('amount',14,2); $t->string('payment_method'); $t->string('description'); $t->string('reference')->nullable(); $t->string('status')->default('posted'); $t->foreignId('user_id')->constrained(); $t->timestamps(); });
+        Schema::table('opening_balance_lines', function(Blueprint $t){$t->foreignId('transaction_unit_id')->nullable()->constrained('units')->nullOnDelete();$t->decimal('transaction_quantity',14,3)->nullable();$t->decimal('conversion_factor',14,3)->nullable();$t->decimal('base_quantity',14,3)->nullable();});
+        Schema::table('stock_transfer_lines', function(Blueprint $t){$t->foreignId('transaction_unit_id')->nullable()->constrained('units')->nullOnDelete();$t->decimal('transaction_quantity',14,3)->nullable();$t->decimal('conversion_factor',14,3)->nullable();});
+    }
+
+    public function down(): void
+    {
+        foreach (['other_incomes','backup_runs','import_jobs','attachments','saved_reports','bank_reconciliations','cashier_shifts','batch_recalls','stock_transfer_lines','stock_transfers','stock_adjustments','stock_count_lines','stock_counts','opening_balance_lines','opening_balance_sessions','document_sequences','product_units','units'] as $table) Schema::dropIfExists($table);
+        foreach (['sales_invoices','purchase_invoices','invoice_returns','purch_returns','receipt_vouchers','payment_vouchers','expenses'] as $table) Schema::table($table, fn (Blueprint $t) => $t->dropColumn('document_number'));
+        Schema::table('prod_sales', fn (Blueprint $t) => $t->dropColumn(['transaction_unit_id','transaction_quantity','base_quantity','original_unit_price','applied_unit_price','discount_reason','price_overridden']));
+        Schema::table('stock', fn (Blueprint $t) => $t->dropColumn(['branch_id','unit_cost','disposition']));
+        Schema::table('product_batches', fn (Blueprint $t) => $t->dropColumn(['branch_id','inventory_state','state_reason','state_changed_by','state_changed_at']));
+        Schema::table('customers', fn (Blueprint $t) => $t->dropColumn(['credit_limit','credit_warning_threshold','block_on_limit']));
+        Schema::table('products', fn (Blueprint $t) => $t->dropColumn(['base_unit_id','minimum_stock','reorder_level','reorder_quantity']));
+    }
+};

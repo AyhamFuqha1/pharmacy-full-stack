@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Sparkles, AlertCircle, Package } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface Message {
   id: string;
@@ -31,6 +32,7 @@ const initialMessages: Message[] = [
 ];
 
 export function ChatPage() {
+  const { t, i18n } = useTranslation();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -135,15 +137,15 @@ export function ChatPage() {
     <div className="h-full flex flex-col p-8">
       {/* Page Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">AI Assistant</h1>
-        <p className="text-gray-500">Ask me anything about your pharmacy operations and inventory</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('AI Assistant')}</h1>
+        <p className="text-gray-500">{t('Ask me anything about your pharmacy operations and inventory')}</p>
       </div>
 
       {/* Chat Container */}
       <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
         {/* Quick Actions */}
         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Quick Actions</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">{t('Quick Actions')}</p>
           <div className="flex flex-wrap gap-2">
             {quickActions.map((action) => {
               const Icon = action.icon;
@@ -154,7 +156,7 @@ export function ChatPage() {
                   className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 hover:border-teal-500 hover:text-teal-700 hover:bg-teal-50 transition-all"
                 >
                   <Icon className="w-4 h-4" />
-                  <span>{action.label}</span>
+                  <span>{t(action.label)}</span>
                 </button>
               );
             })}
@@ -190,7 +192,7 @@ export function ChatPage() {
                         : 'bg-gradient-to-br from-teal-50 to-emerald-50 text-gray-900 border border-teal-100'
                     }`}
                   >
-                    <p className="text-sm leading-relaxed">{message.content}</p>
+                    <p className="text-sm leading-relaxed">{message.type === 'ai' ? t(message.content) : message.content}</p>
                   </div>
 
                   {/* Alert Card */}
@@ -214,10 +216,10 @@ export function ChatPage() {
                         </div>
                         <div className="flex-1">
                           <h4 className="font-semibold text-gray-900 text-sm mb-1">
-                            {message.alertCard.title}
+                            {t(message.alertCard.title)}
                           </h4>
                           <p className="text-sm text-gray-600 leading-relaxed">
-                            {message.alertCard.message}
+                            {t(message.alertCard.message)}
                           </p>
                         </div>
                       </div>
@@ -225,7 +227,7 @@ export function ChatPage() {
                   )}
 
                   <span className="text-xs text-gray-400 mt-1 block">
-                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <bdi dir="ltr">{message.timestamp.toLocaleTimeString(i18n.resolvedLanguage === 'ar' ? 'ar' : 'en', { hour: '2-digit', minute: '2-digit' })}</bdi>
                   </span>
                 </div>
               </div>
@@ -261,7 +263,7 @@ export function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Type your question here..."
+              placeholder={t('Type your question here...')}
               className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
             />
             <button
@@ -270,7 +272,7 @@ export function ChatPage() {
               className="px-6 py-3 bg-gradient-to-r from-teal-600 to-emerald-500 text-white rounded-xl hover:from-teal-700 hover:to-emerald-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center gap-2"
             >
               <Send className="w-5 h-5" />
-              <span className="font-medium">Send</span>
+              <span className="font-medium">{t('Send')}</span>
             </button>
           </div>
         </div>

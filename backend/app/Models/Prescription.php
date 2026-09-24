@@ -16,4 +16,16 @@ class Prescription extends Model
         'status',
         'notes',
     ];
+
+    protected $casts = ['prescribed_at' => 'date', 'expires_at' => 'date'];
+
+    public function patient()
+    {
+        return $this->belongsTo(Patient::class);
+    }
+
+    public function items()
+    {
+        return $this->hasMany(PrescriptionItem::class);
+    }
 }

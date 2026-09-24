@@ -1,12 +1,13 @@
 <?php
 
-use Illuminate\Database\Schema\Builder as Schema;
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
-use App\Models\User;
+use Illuminate\Support\Facades\Schedule;
+use Symfony\Component\Console\Input\InputOption;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -26,27 +27,32 @@ Artisan::command('app:create-admin', function () {
 
     if (! $name || ! $email || ! $password) {
         $this->error('Name, email, and password are required.');
+
         return 1;
     }
 
     if ($password !== $confirm) {
         $this->error('Password confirmation does not match.');
+
         return 1;
     }
 
     if (! DB::getSchemaBuilder()->hasTable('roles')) {
         $this->error('Roles table is missing. Run migrations first.');
+
         return 1;
     }
 
-    $roles = DB::table('roles')->get();
-    if ($roles->isEmpty()) {
-        DB::table('roles')->updateOrInsert(['id' => 1], ['name' => 'Administrator']);
-        DB::table('roles')->updateOrInsert(['id' => 2], ['name' => 'Normal User']);
+    $administratorRole = Role::query()->where('name', 'Administrator')->first();
+    if (! $administratorRole) {
+        $this->error('The Administrator role is missing. Run php artisan db:seed first.');
+
+        return 1;
     }
 
-    if (User::where('role', User::ROLE_ADMINISTRATOR)->exists()) {
+    if (User::where('role', $administratorRole->id)->exists()) {
         $this->error('An administrator already exists.');
+
         return 1;
     }
 
@@ -54,17 +60,21 @@ Artisan::command('app:create-admin', function () {
         'name' => $name,
         'email' => $email,
         'password' => Hash::make($password),
-        'role' => User::ROLE_ADMINISTRATOR,
+        'role' => $administratorRole->id,
         'force_change_password' => false,
     ]);
 
     $this->info('Administrator created successfully.');
-    $this->line('Name: ' . $user->name);
-    $this->line('Email: ' . $user->email);
+    $this->line('Name: '.$user->name);
+    $this->line('Email: '.$user->email);
 
     return 0;
 })->purpose('Create the first administrator account')
-    ->addOption('name', null, null, 'Administrator name')
-    ->addOption('email', null, null, 'Administrator email')
-    ->addOption('password', null, null, 'Administrator password')
-    ->addOption('password_confirmation', null, null, 'Administrator password confirmation');
+    ->addOption('name', null, InputOption::VALUE_REQUIRED, 'Administrator name')
+    ->addOption('email', null, InputOption::VALUE_REQUIRED, 'Administrator email')
+    ->addOption('password', null, InputOption::VALUE_REQUIRED, 'Administrator password')
+    ->addOption('password_confirmation', null, InputOption::VALUE_REQUIRED, 'Administrator password confirmation');
+
+if (config('backup.schedule') === 'daily') {
+    Schedule::command('backup:create')->daily()->withoutOverlapping();
+}

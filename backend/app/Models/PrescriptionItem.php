@@ -12,4 +12,9 @@ class PrescriptionItem extends Model
         'allowed_quantity',
         'dispensed_quantity',
     ];
+
+    public function product()
+    {
+        return $this->belongsTo(Product::class);
+    }
 }

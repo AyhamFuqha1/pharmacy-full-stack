@@ -15,16 +15,12 @@ class ProductBatchController extends Controller
     }
     public function index(\Illuminate\Http\Request $request)
     {
+        $request->validate(['archive_status' => 'nullable|in:active,archived,all', 'product_id' => 'nullable|integer', 'branch_id' => 'nullable|integer|exists:branches,id', 'search' => 'nullable|string|max:255', 'page' => 'nullable|integer|min:1', 'per_page' => 'nullable|integer|min:1|max:100', 'expiry_from' => 'nullable|date', 'expiry_to' => 'nullable|date|after_or_equal:expiry_from', 'quantity_min' => 'nullable|integer|min:0', 'quantity_max' => 'nullable|integer|gte:quantity_min', 'stock_status' => 'nullable|in:available,out_of_stock,expired,expiring', 'sort' => 'nullable|in:expiry_date,quantity,created_at', 'direction' => 'nullable|in:asc,desc']);
         $result = $this->ProductBatchService->index($request);
-        if (!$result) {
-            return response()->json(
-                ["  message" => "Not Contant"],
-                204
-            );
-
-        } else {
-            return response()->json($result, 200);
+        if (! $this->canViewCost()) {
+            $result->through(fn ($batch) => $batch->makeHidden('purchase_price'));
         }
+        return $this->collection($result, 'Batches retrieved.');
     }
 
 
@@ -40,14 +36,13 @@ class ProductBatchController extends Controller
 
     public function show($id)
     {
-        $batches = $this->ProductBatchService->show($id);
+        request()->validate(['archive_status' => ['nullable', 'in:active,archived,all']]);
+        $batches = $this->ProductBatchService->show($id, request('archive_status', 'active'));
+        if ($batches && ! $this->canViewCost()) $batches->makeHidden('purchase_price');
         if (!$batches) {
-            return response()->json(
-                ["message" => "Not Found"],
-                404
-            );
+            return $this->failure('Batch not found.', 404);
         } else {
-            return response()->json($batches, 200);
+            return $this->success($batches, 200, 'Batch retrieved.');
         }
     }
 
@@ -58,12 +53,9 @@ class ProductBatchController extends Controller
         $response = $this->ProductBatchService->update($request, $id);
 
         if (!$response) {
-            return response()->json(
-                ["message" => "Not Found"],
-                404
-            );
+            return $this->failure('Batch not found.', 404);
         } else {
-            return response()->json($request, 200);
+            return $this->success($response, 200, 'Batch updated.');
         }
 
     }
@@ -71,9 +63,24 @@ class ProductBatchController extends Controller
     public function destroy($id)
     {
         $response = $this->ProductBatchService->destroy($id);
-        return response()->json(
-            ["message" => $response['message']],
-            $response['status']
-        );
+        if ($response['status'] >= 400) {
+            return $this->failure($response['message'], $response['status']);
+        }
+
+        return $this->success(null, $response['status'], $response['message']);
+    }
+
+    public function restore($id)
+    {
+        $response = $this->ProductBatchService->restore($id);
+        return $response['status'] >= 400
+            ? $this->failure($response['message'], $response['status'])
+            : $this->success($response['data'], 200, $response['message']);
+    }
+
+    private function canViewCost(): bool
+    {
+        $user = request()->user();
+        return $user?->hasPermission('reports.view_cost') || $user?->hasPermission('inventory.view_cost');
     }
 }

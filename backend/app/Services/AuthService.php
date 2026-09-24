@@ -27,19 +27,20 @@ class AuthService
                 ->where('active', true)
                 ->first();
 
-            if ($attendance) {
-                return [
-                    "message" => "User already logged in ",
-                    "status" => 409
-                ];
+            if (! $attendance) {
+                DB::table('attendance_logs')->insert([
+                    'user_id' => $user->id,
+                    'work_date' => date('Y-m-d'),
+                    'check_in_at' => now(),
+                    'active' => true,
+                ]);
             }
 
-            DB::table('attendance_logs')->insert([
-                'user_id' => $user->id,
-                'work_date' => date('Y-m-d'),
-                'check_in_at' => now(),
-                'active' => true,
-            ]);
+            // Attendance is operational state, not authentication state. A browser
+            // may lose its bearer token while the user's attendance remains active.
+            // Replace any prior API token after the credentials have been verified so
+            // the user can recover without creating a duplicate attendance record.
+            $user->tokens()->delete();
 
             $token = $user->createToken('api-token')->plainTextToken;
 
@@ -73,7 +74,7 @@ class AuthService
 
             SsendRegisterEmailJob::dispatch($data->email, $data->name, $tempPassword);
 
-            return true;
+            return User::query()->with('roleRelation:id,name')->findOrFail($userId);
         });
     }
 

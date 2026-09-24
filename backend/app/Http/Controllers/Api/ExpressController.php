@@ -3,90 +3,48 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Express;
+use App\Http\Requests\StoreExpenseRequest;
 use App\Services\ExpressService;
 use Illuminate\Http\Request;
 use Throwable;
+use App\Exceptions\AccountingPeriodException;
 
 class ExpressController extends Controller
 {
-    private ExpressService $expressService;
-    public function index()
+    public function __construct(private ExpressService $expenses) {}
+
+    public function index(Request $request)
     {
-        $Checks = $this->expressService->index();
-        try {
-            if (!$Checks) {
-                return response()->json(
-                    ["message" => "No Express"]
-                    ,
-                    200
-                );
-            } else {
-                return response()->json(
-                    $Checks,
-                    200
-                );
-            }
-        } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
-
-        }
-
+        return $this->collection(\DB::table('expenses')->orderByDesc('id')->paginate(min(max((int) $request->input('per_page', 15), 1), 100)), 'Expenses retrieved.');
     }
 
-    public function store($request)
+    public function store(StoreExpenseRequest $request)
     {
+        $data = $request->validated();
         try {
-            $user = auth()->user();
-            $this->expressService->store($request, $user);
-            return response()->json("created",201);
+            $id = $this->expenses->store((object) $data, $request->user());
+            return $this->success($this->expenses->show($id), 201, 'Expense posted.');
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                200
-            );
+            if ($e instanceof AccountingPeriodException) throw $e;
+            report($e); return $this->failure('Server error.', 500);
         }
     }
-
 
     public function show($id)
     {
-        try {
-            $response = $this->expressService->show($id);
-            if (!$response) {
-                return response()->json([
-                    "message" => "No Express"
-                ], 404);
-            } else {
-                return response()->json([
-                    "message" => $response
-                ], 404);
-            }
-        } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
-        }
+        $expense = $this->expenses->show($id);
+        return $expense ? $this->success($expense, 200, 'Expense retrieved.') : $this->failure('Expense not found.', 404);
     }
 
-
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
-            $response = $this->expressService->destroy($id);
-            return response()->json([
-                "status" => $response['status'],
-                "message" => $response['message']
-            ], $response['status'] ? 200 : 422);
+            $result = $this->expenses->destroy($id, $request->user());
+            if (!$result['status']) return $this->failure($result['message'], 409);
+            return $this->success($this->expenses->show($id), 200, $result['message']);
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            if ($e instanceof AccountingPeriodException) throw $e;
+            report($e); return $this->failure('Server error.', 500);
         }
-    } 
+    }
 }

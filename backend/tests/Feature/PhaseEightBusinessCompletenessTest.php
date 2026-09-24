@@ -72,9 +72,9 @@ class PhaseEightBusinessCompletenessTest extends TestCase
         $response = $this->actingAs($this->admin, 'sanctum')->getJson('/api/product/barcode/BC-100');
 
         $response->assertOk();
-        $response->assertJsonPath('product.barcode', 'BC-100');
-        $response->assertJsonCount(1, 'available_batches');
-        $response->assertJsonPath('available_batches.0.batch_number', 'GOOD-BATCH');
+        $response->assertJsonPath('data.product.barcode', 'BC-100');
+        $response->assertJsonCount(1, 'data.available_batches');
+        $response->assertJsonPath('data.available_batches.0.batch_number', 'GOOD-BATCH');
     }
 
     public function test_controlled_medicine_prescription_dispensing_enforces_limits(): void
@@ -110,15 +110,22 @@ class PhaseEightBusinessCompletenessTest extends TestCase
             'allowed_quantity' => 5,
         ])->assertStatus(201);
 
-        $this->actingAs($this->admin, 'sanctum')->postJson("/api/prescriptions/{$prescriptionId}/dispense", [
-            'product_id' => $product->id,
-            'quantity' => 3,
-        ])->assertOk()->assertJsonPath('remaining_quantity', 2);
+        DB::table('product_batches')->insert([
+            'product_id' => $product->id, 'batch_number' => 'CTRL-STOCK',
+            'expiry_date' => now()->addYear()->toDateString(), 'quantity' => 5,
+            'purchase_price' => 10, 'sale_price' => 15,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
 
         $this->actingAs($this->admin, 'sanctum')->postJson("/api/prescriptions/{$prescriptionId}/dispense", [
             'product_id' => $product->id,
             'quantity' => 3,
-        ])->assertStatus(422);
+        ])->assertOk()->assertJsonPath('data.remaining_quantity', 2);
+
+        $this->actingAs($this->admin, 'sanctum')->postJson("/api/prescriptions/{$prescriptionId}/dispense", [
+            'product_id' => $product->id,
+            'quantity' => 3,
+        ])->assertStatus(409);
     }
 
     public function test_advanced_audit_report_endpoint_returns_summary_data(): void

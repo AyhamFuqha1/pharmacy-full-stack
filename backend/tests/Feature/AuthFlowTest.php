@@ -35,6 +35,22 @@ class AuthFlowTest extends TestCase
         $this->assertTrue(Hash::check('StrongPass123!', $user->password));
     }
 
+    public function test_create_admin_command_accepts_non_interactive_options(): void
+    {
+        $this->artisan('app:create-admin', [
+            '--name' => 'Acceptance Admin',
+            '--email' => 'acceptance.admin@example.test',
+            '--password' => 'Acceptance-Temp-2026!',
+            '--password_confirmation' => 'Acceptance-Temp-2026!',
+        ])->assertSuccessful();
+
+        $this->assertDatabaseHas('users', [
+            'name' => 'Acceptance Admin',
+            'email' => 'acceptance.admin@example.test',
+            'role' => User::ROLE_ADMINISTRATOR,
+        ]);
+    }
+
     public function test_login_returns_token_for_valid_user(): void
     {
         $roleId = 1;
@@ -52,9 +68,60 @@ class AuthFlowTest extends TestCase
         ]);
 
         $response->assertOk();
-        $response->assertJsonPath('message', 'Login successful');
-        $this->assertNotEmpty($response->json('token'));
+        $response->assertJsonPath('success', true)->assertJsonPath('message', 'Login successful');
+        $this->assertNotEmpty($response->json('data.token'));
         $this->assertDatabaseHas('attendance_logs', ['user_id' => $user->id, 'active' => 1]);
+    }
+
+    public function test_authenticated_user_can_be_loaded_then_logged_out(): void
+    {
+        $user = User::factory()->create([
+            'role' => 1,
+            'password' => Hash::make('StrongPass123!'),
+            'force_change_password' => false,
+        ]);
+
+        $login = $this->postJson('/api/login', [
+            'email' => $user->email,
+            'password' => 'StrongPass123!',
+        ])->assertOk();
+
+        $token = $login->json('data.token');
+        $this->withToken($token)->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('data.id', $user->id);
+
+        $this->withToken($token)->postJson('/api/logout')->assertOk();
+        $this->app['auth']->forgetGuards();
+        $this->withToken($token)->getJson('/api/user')->assertUnauthorized();
+        $this->assertDatabaseHas('attendance_logs', ['user_id' => $user->id, 'active' => 0]);
+    }
+
+    public function test_login_with_active_attendance_recovers_by_replacing_the_token(): void
+    {
+        $user = User::factory()->create([
+            'role' => 1,
+            'password' => Hash::make('StrongPass123!'),
+            'force_change_password' => false,
+        ]);
+        $oldToken = $user->createToken('api-token')->plainTextToken;
+        \DB::table('attendance_logs')->insert([
+            'user_id' => $user->id,
+            'work_date' => now()->toDateString(),
+            'check_in_at' => now(),
+            'active' => true,
+        ]);
+
+        $login = $this->postJson('/api/login', [
+            'email' => $user->email,
+            'password' => 'StrongPass123!',
+        ])->assertOk()->assertJsonPath('message', 'Login successful');
+
+        $this->assertSame(1, \DB::table('attendance_logs')->where('user_id', $user->id)->count());
+        $this->withToken($oldToken)->getJson('/api/user')->assertUnauthorized();
+        $this->withToken($login->json('data.token'))->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('data.id', $user->id);
     }
 
     public function test_normal_user_cannot_register_another_user(): void
@@ -107,7 +174,7 @@ class AuthFlowTest extends TestCase
             'role' => $normalRoleId,
         ]);
 
-        $response->assertOk();
+        $response->assertCreated()->assertJsonPath('success', true);
         $this->assertDatabaseHas('users', ['email' => 'employee2@example.com', 'role' => $normalRoleId]);
         $this->assertDatabaseHas('audit_logs', ['table_name' => 'users', 'action' => 'create']);
     }

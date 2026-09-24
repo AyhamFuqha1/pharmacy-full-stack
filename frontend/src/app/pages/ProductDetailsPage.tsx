@@ -1,335 +1,146 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router';
-import {
-  ArrowLeft,
-  Edit,
-  Trash2,
-  Plus,
-  TrendingUp,
-  DollarSign,
-  Package,
-  Sparkles,
-  AlertCircle,
-} from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-
-interface Batch {
-  id: string;
-  batchNumber: string;
-  expiryDate: string;
-  quantity: number;
-  purchasePrice: number;
-  status: 'safe' | 'warning' | 'expired';
-}
-
-const mockBatches: Batch[] = [
-  {
-    id: '1',
-    batchNumber: 'BT-2024-001',
-    expiryDate: '2026-12-15',
-    quantity: 150,
-    purchasePrice: 3.99,
-    status: 'safe',
-  },
-  {
-    id: '2',
-    batchNumber: 'BT-2024-002',
-    expiryDate: '2026-03-20',
-    quantity: 80,
-    purchasePrice: 3.89,
-    status: 'warning',
-  },
-  {
-    id: '3',
-    batchNumber: 'BT-2023-045',
-    expiryDate: '2025-01-10',
-    quantity: 25,
-    purchasePrice: 4.10,
-    status: 'expired',
-  },
-];
-
-const salesData = [
-  { month: 'Jan', sales: 320 },
-  { month: 'Feb', sales: 380 },
-  { month: 'Mar', sales: 420 },
-  { month: 'Apr', sales: 450 },
-  { month: 'May', sales: 480 },
-  { month: 'Jun', sales: 520 },
-];
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
+import { ArrowLeft, Edit, Image as ImageIcon, Package, ShieldAlert, Trash2 } from 'lucide-react';
+import { ApiClientError } from '../../api/client';
+import { batchesApi } from '../../api/batches';
+import { productImageUrl, productsApi } from '../../api/products';
+import { PermissionGate } from '../../auth/PermissionGate';
+import { useAuth } from '../../auth/useAuth';
+import type { BatchDto } from '../../types/batch';
+import type { ProductDto } from '../../types/product';
+import { batchStatus, classifyExpiry, formatDateOnly, formatMoney } from '../../utils/batchFormatters';
+import { StatusBadge } from './BatchesPage';
+import { ProductReporting } from '../components/ProductReporting';
 
 export function ProductDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { hasPermission } = useAuth();
+  const productId = Number(id);
+  const [product, setProduct] = useState<ProductDto | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<ApiClientError | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [batches, setBatches] = useState<BatchDto[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+  const [batchesError, setBatchesError] = useState<ApiClientError | null>(null);
 
-  // Mock product data
-  const product = {
-    id: id || '1',
-    name: 'Paracetamol 500mg',
-    barcode: '1234567890123',
-    description: 'Effective pain relief and fever reducer. Suitable for adults and children over 12 years.',
-    category: 'Pain Relief',
-    image: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=800',
-    purchasePrice: 3.99,
-    sellingPrice: 5.99,
-    profitMargin: 50.1,
-    currentStock: 255,
-    minStockAlert: 100,
-    expiryAlertDays: 30,
-    totalSold30Days: 450,
-    totalProfit30Days: 900,
-    avgMonthlySales: 430,
-    suggestedReorder: 500,
-  };
+  useEffect(() => {
+    if (!Number.isInteger(productId) || productId <= 0) {
+      setError(new ApiClientError(404, 'Product not found.'));
+      setIsLoading(false);
+      return;
+    }
 
-  const getBatchStatusBadge = (status: string) => {
-    const styles = {
-      safe: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-      warning: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-      expired: 'bg-red-100 text-red-700 border-red-200',
-    };
-    const labels = {
-      safe: 'Safe',
-      warning: 'Expiring Soon',
-      expired: 'Expired',
-    };
-    return { style: styles[status as keyof typeof styles], label: labels[status as keyof typeof labels] };
-  };
+    const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
+    productsApi.detail(productId, controller.signal, new URLSearchParams(location.search).get('archive_status') === 'archived' ? 'archived' : undefined)
+      .then((response) => setProduct(response.data))
+      .catch((requestError: unknown) => {
+        if (requestError instanceof DOMException && requestError.name === 'AbortError') return;
+        setError(requestError instanceof ApiClientError ? requestError : new ApiClientError(0, 'Unable to load the product.'));
+      })
+      .finally(() => { if (!controller.signal.aborted) setIsLoading(false); });
+    return () => controller.abort();
+  }, [productId, reloadKey]);
+
+  useEffect(() => {
+    if (!Number.isInteger(productId) || productId <= 0 || !hasPermission('batches.manage')) return;
+    const controller = new AbortController();
+    setBatchesLoading(true); setBatchesError(null);
+    batchesApi.listAll({ product_id: productId, sort: 'expiry_date', direction: 'asc' }, controller.signal)
+      .then(setBatches)
+      .catch((requestError: unknown) => {
+        if (requestError instanceof DOMException && requestError.name === 'AbortError') return;
+        setBatchesError(requestError instanceof ApiClientError ? requestError : new ApiClientError(0, 'Unable to load product batches.'));
+      })
+      .finally(() => { if (!controller.signal.aborted) setBatchesLoading(false); });
+    return () => controller.abort();
+  }, [hasPermission, productId]);
+
+  async function deleteProduct() {
+    if (!product) return;
+    setIsDeleting(true);
+    try {
+      await productsApi.delete(product.id);
+      navigate('/products', { replace: true, state: { success: `${product.name} was deleted.` } });
+    } catch (requestError) {
+      setConfirmingDelete(false);
+      setError(requestError instanceof ApiClientError ? requestError : new ApiClientError(0, 'Unable to delete the product.'));
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  if (isLoading) return <DetailLoading />;
+
+  if (error || !product) {
+    const notFound = error?.status === 404;
+    return <div className="p-8"><button onClick={() => navigate('/products')} className="flex items-center gap-2 text-gray-600 mb-6"><ArrowLeft className="w-5 h-5" /> Back to Products</button><div className="bg-white rounded-2xl border border-gray-100 p-12 text-center"><Package className="w-14 h-14 text-gray-300 mx-auto mb-4" /><h1 className="text-2xl font-bold text-gray-900 mb-2">{notFound ? 'Product not found' : error?.status === 403 ? 'Products access denied' : 'Unable to load product'}</h1><p className="text-gray-500 mb-6">{error?.message}</p>{!notFound && error?.status !== 403 && <button onClick={() => setReloadKey((key) => key + 1)} className="px-5 py-2.5 bg-teal-600 text-white rounded-xl">Retry</button>}</div></div>;
+  }
+
+  const image = productImageUrl(product.img);
+  const totalQuantity = batches.reduce((total, batch) => total + batch.quantity, 0);
+  const activeBatches = batches.filter((batch) => batch.quantity > 0 && classifyExpiry(batch.expiry_date) !== 'expired');
+  const nearestExpiry = activeBatches[0]?.expiry_date;
 
   return (
     <div className="p-8">
-      {/* Back Button */}
-      <button
-        onClick={() => navigate('/products')}
-        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6 transition-colors"
-      >
-        <ArrowLeft className="w-5 h-5" />
-        <span className="font-medium">Back to Products</span>
-      </button>
+      <button onClick={() => navigate('/products')} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"><ArrowLeft className="w-5 h-5" /> Back to Products</button>
 
-      {/* Product Overview Section */}
+      {(location.state as { success?: string } | null)?.success && <div className="mb-6 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700">{(location.state as { success?: string }).success}</div>}
+
+      {error && <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl"><p className="font-semibold text-red-800">{error.status === 409 ? 'Product could not be deleted' : 'Product request failed'}</p><p className="text-sm text-red-700 mt-1">{error.message}</p></div>}
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 p-8">
-          {/* Left: Image */}
-          <div>
-            <div className="aspect-square rounded-2xl overflow-hidden bg-gray-100">
-              <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+          <div>{image ? <img src={image} alt={product.name} className="w-full aspect-square rounded-2xl object-cover bg-gray-100" /> : <div className="w-full aspect-square rounded-2xl bg-gray-100 flex flex-col items-center justify-center text-gray-400"><ImageIcon className="w-20 h-20 mb-3" /><span>No product image</span></div>}</div>
+          <div className="flex flex-col">
+            <div className="flex items-start justify-between gap-4 mb-4"><div><h1 className="text-3xl font-bold text-gray-900 mb-2">{product.name}</h1><p className="font-mono text-sm text-gray-500">{product.barcode}</p></div>{product.is_controlled && <span className="inline-flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-sm font-semibold"><ShieldAlert className="w-4 h-4" /> Controlled</span>}</div>
+            <div className="border-t border-gray-100 pt-5 mb-6"><h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Notes</h2><p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{product.nots || 'No notes have been recorded for this product.'}</p></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+              <InfoCard label="Medicine type" value={product.is_controlled ? 'Controlled medicine' : 'Standard medicine'} />
+              <InfoCard label="Control schedule" value={product.is_controlled ? product.control_schedule || 'Not specified' : 'Not applicable'} />
+              <InfoCard label="Created" value={formatDate(product.created_at)} />
+              <InfoCard label="Last updated" value={formatDate(product.updated_at)} />
             </div>
-          </div>
-
-          {/* Right: Details */}
-          <div>
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">{product.name}</h1>
-                <p className="text-sm text-gray-500 font-mono mb-3">{product.barcode}</p>
-                <span className="inline-flex px-3 py-1 bg-teal-100 text-teal-700 text-sm font-medium rounded-lg">
-                  {product.category}
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => navigate(`/products/${product.id}/edit`)}
-                  className="p-2.5 bg-teal-50 text-teal-600 rounded-xl hover:bg-teal-100 transition-colors"
-                >
-                  <Edit className="w-5 h-5" />
-                </button>
-                <button className="p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors">
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <p className="text-gray-600 leading-relaxed mb-6">{product.description}</p>
-
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="p-4 bg-gray-50 rounded-xl">
-                <p className="text-sm text-gray-500 mb-1">Purchase Price</p>
-                <p className="text-xl font-bold text-gray-900">${product.purchasePrice}</p>
-              </div>
-              <div className="p-4 bg-teal-50 rounded-xl">
-                <p className="text-sm text-teal-600 mb-1">Selling Price</p>
-                <p className="text-xl font-bold text-teal-700">${product.sellingPrice}</p>
-              </div>
-              <div className="p-4 bg-emerald-50 rounded-xl">
-                <p className="text-sm text-emerald-600 mb-1">Profit Margin</p>
-                <p className="text-xl font-bold text-emerald-700">{product.profitMargin}%</p>
-              </div>
-              <div className="p-4 bg-blue-50 rounded-xl">
-                <p className="text-sm text-blue-600 mb-1">Current Stock</p>
-                <p className="text-xl font-bold text-blue-700">{product.currentStock} units</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Min Stock Alert</label>
-                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 font-semibold">
-                  {product.minStockAlert} units
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Alert Days</label>
-                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 font-semibold">
-                  {product.expiryAlertDays} days
-                </div>
-              </div>
-            </div>
+            <div className="flex gap-3 mt-auto"><PermissionGate permission="products.manage"><button onClick={() => navigate(`/products/${product.id}/edit`)} className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-teal-600 to-emerald-500 text-white rounded-xl"><Edit className="w-4 h-4" /> Edit Product</button><button onClick={() => setConfirmingDelete(true)} className="flex items-center gap-2 px-5 py-3 bg-red-50 text-red-600 rounded-xl"><Trash2 className="w-4 h-4" /> Delete</button></PermissionGate></div>
           </div>
         </div>
       </div>
 
-      {/* Smart Insights Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Total Sold</p>
-              <p className="text-xs text-gray-400">Last 30 days</p>
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{product.totalSold30Days}</p>
+      <div className="grid grid-cols-1 gap-6">
+        <div className="bg-white rounded-2xl border border-gray-100 p-6">
+          <div className="flex items-center gap-3 mb-5"><div className="w-12 h-12 bg-teal-50 rounded-xl flex items-center justify-center"><Package className="w-7 h-7 text-teal-600" /></div><div><h2 className="text-lg font-bold text-gray-900">Batch inventory</h2><p className="text-sm text-gray-500">Persisted inventory records; FEFO is enforced by the backend sales workflow.</p></div></div>
+          {!hasPermission('batches.manage') && <p className="p-4 bg-amber-50 text-amber-800 rounded-xl">You do not have permission to view batch inventory.</p>}
+          {hasPermission('batches.manage') && batchesLoading && <p className="p-6 text-center text-gray-500">Loading batch inventory…</p>}
+          {hasPermission('batches.manage') && batchesError && <p className="p-4 bg-red-50 text-red-700 rounded-xl">{batchesError.message}</p>}
+          {hasPermission('batches.manage') && !batchesLoading && !batchesError && <>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5"><InfoCard label="Total current quantity" value={String(totalQuantity)} /><InfoCard label="Active batches" value={String(activeBatches.length)} /><InfoCard label="Nearest active expiry" value={nearestExpiry ? formatDateOnly(nearestExpiry) : 'None'} /></div>
+            {batches.length === 0 ? <p className="p-6 text-center text-gray-500 bg-gray-50 rounded-xl">No batches have been created for this product.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[720px]"><thead className="bg-gray-50 text-left text-xs uppercase text-gray-500"><tr><th className="p-3">Batch</th><th className="p-3">Expiry</th><th className="p-3 text-right">Quantity</th><th className="p-3 text-right">Purchase cost</th><th className="p-3 text-right">Sale price</th><th className="p-3">Status</th></tr></thead><tbody className="divide-y">{batches.map((batch) => <tr key={batch.id}><td className="p-3 font-mono text-sm">{batch.batch_number}</td><td className="p-3">{formatDateOnly(batch.expiry_date)}</td><td className="p-3 text-right font-semibold">{batch.quantity}</td><td className="p-3 text-right">{formatMoney(batch.purchase_price)}</td><td className="p-3 text-right">{formatMoney(batch.sale_price)}</td><td className="p-3"><StatusBadge status={batchStatus(batch)} /></td></tr>)}</tbody></table></div>}
+          </>}
         </div>
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-emerald-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Total Profit</p>
-              <p className="text-xs text-gray-400">Last 30 days</p>
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">${product.totalProfit30Days}</p>
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-              <Package className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Avg Monthly Sales</p>
-              <p className="text-xs text-gray-400">6 months trend</p>
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{product.avgMonthlySales}</p>
-        </div>
-
-        <div className="bg-gradient-to-br from-teal-50 to-emerald-50 border border-teal-200 rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-emerald-500 rounded-xl flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <p className="text-sm text-teal-700 font-semibold">AI Suggestion</p>
-              <p className="text-xs text-teal-600">Reorder Qty</p>
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-teal-700">{product.suggestedReorder} units</p>
-        </div>
+        <ProductReporting productId={product.id} />
       </div>
 
-      {/* Sales Trend Chart */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-6">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Sales Trend (6 Months)</h3>
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={salesData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="month" stroke="#94a3b8" style={{ fontSize: '12px' }} />
-            <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#fff',
-                border: '1px solid #e5e7eb',
-                borderRadius: '12px',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              }}
-            />
-            <Line
-              type="monotone"
-              dataKey="sales"
-              stroke="#0D7D6D"
-              strokeWidth={3}
-              dot={{ fill: '#0D7D6D', r: 5 }}
-              activeDot={{ r: 7 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Batch Management Section */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-gray-900">Batch Management</h3>
-            <p className="text-sm text-gray-500">Track and manage product batches</p>
-          </div>
-          <button className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-500 text-white rounded-xl hover:from-teal-700 hover:to-emerald-600 transition-all shadow-sm">
-            <Plus className="w-4 h-4" />
-            <span className="font-medium">Add Batch</span>
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase">Batch Number</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase">Expiry Date</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase">Quantity</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase">Purchase Price</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
-                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {mockBatches.map((batch) => {
-                const statusBadge = getBatchStatusBadge(batch.status);
-                return (
-                  <tr key={batch.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <span className="font-mono font-semibold text-gray-900">{batch.batchNumber}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        {batch.status === 'warning' && <AlertCircle className="w-4 h-4 text-yellow-600" />}
-                        {batch.status === 'expired' && <AlertCircle className="w-4 h-4 text-red-600" />}
-                        <span className="text-gray-900">{batch.expiryDate}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="font-semibold text-gray-900">{batch.quantity} units</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="font-semibold text-gray-900">${batch.purchasePrice}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex px-3 py-1 rounded-lg text-xs font-semibold border ${statusBadge.style}`}>
-                        {statusBadge.label}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <button className="p-2 hover:bg-gray-100 text-gray-600 rounded-lg transition-colors">
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {confirmingDelete && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true"><div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6"><h2 className="text-xl font-bold text-gray-900 mb-2">Delete product?</h2><p className="text-gray-600 mb-6">Delete <strong>{product.name}</strong>? This action may be rejected if the product conflicts with existing records.</p><div className="flex gap-3"><button disabled={isDeleting} onClick={() => setConfirmingDelete(false)} className="flex-1 py-2.5 bg-gray-100 rounded-xl">Cancel</button><button disabled={isDeleting} onClick={() => void deleteProduct()} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl disabled:opacity-60">{isDeleting ? 'Deleting...' : 'Delete'}</button></div></div></div>}
     </div>
   );
+}
+
+function InfoCard({ label, value }: { label: string; value: string }) {
+  return <div className="p-4 bg-gray-50 rounded-xl"><p className="text-xs text-gray-500 mb-1">{label}</p><p className="font-semibold text-gray-900">{value}</p></div>;
+}
+
+function DetailLoading() {
+  return <div className="p-8 animate-pulse"><div className="h-6 w-36 bg-gray-200 rounded mb-6" /><div className="bg-white rounded-2xl border border-gray-100 p-8 grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="aspect-square bg-gray-200 rounded-2xl" /><div className="space-y-5"><div className="h-9 bg-gray-200 rounded w-2/3" /><div className="h-5 bg-gray-100 rounded w-1/2" /><div className="h-24 bg-gray-100 rounded" /><div className="grid grid-cols-2 gap-4"><div className="h-20 bg-gray-100 rounded" /><div className="h-20 bg-gray-100 rounded" /></div></div></div></div>;
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unavailable' : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date);
 }

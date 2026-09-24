@@ -1,0 +1,6 @@
+import{apiClient}from'./client';import type{PaginatedResponse}from'../types/api';
+export interface AccountLookup{ id:number;code:string;name:string;account_type:string;active:boolean }
+export interface BankAccountLookup{id:number;code:string;display_name:string;active:boolean}
+export interface PartyLookup{id:number;party_type:'customer'|'supplier';display_name:string;phone_reference:string|null}
+const query=(params:Record<string,unknown>)=>{const q=new URLSearchParams();Object.entries(params).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=='')q.set(k,String(v))});return q.toString()};
+export const lookupsApi={accounts:(params:{q?:string;type?:'expense'|'revenue';page?:number;per_page?:number},signal?:AbortSignal)=>apiClient.get<PaginatedResponse<AccountLookup>>(`lookups/accounts?${query({...params,active:1})}`,signal),bankAccounts:(params:{q?:string;page?:number;per_page?:number},signal?:AbortSignal)=>apiClient.get<PaginatedResponse<BankAccountLookup>>(`lookups/bank-accounts?${query({...params,active:1})}`,signal),parties:(params:{q?:string;party_type?:'customer'|'supplier';page?:number;per_page?:number},signal?:AbortSignal)=>apiClient.get<PaginatedResponse<PartyLookup>>(`lookups/parties?${query(params)}`,signal)};

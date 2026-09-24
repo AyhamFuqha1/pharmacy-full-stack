@@ -1,6 +1,10 @@
-import { QrCode, Phone, Mail, MapPin, Printer } from 'lucide-react';
+import { QrCode, Printer } from 'lucide-react';
+import { formatMoney } from '../../utils/batchFormatters';
+import type { JsonRecord } from '../../api/erpOperations';
+import { PrintIdentityHeader } from './PrintIdentityHeader';
 
 interface ReceiptVoucherProps {
+  printIdentity: JsonRecord;
   receiptNumber: string;
   date: string;
   customerName: string;
@@ -15,6 +19,7 @@ interface ReceiptVoucherProps {
 }
 
 export function ReceiptVoucher({
+  printIdentity,
   receiptNumber,
   date,
   customerName,
@@ -48,34 +53,8 @@ export function ReceiptVoucher({
       <div className="max-w-4xl mx-auto bg-white shadow-lg print:shadow-none">
         {/* Header Section */}
         <div className="border-b-4 border-teal-600 p-8">
+          <PrintIdentityHeader identity={printIdentity} />
           <div className="flex items-start justify-between">
-            {/* Left: Pharmacy Info */}
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-16 h-16 bg-gradient-to-br from-teal-600 to-emerald-500 rounded-xl flex items-center justify-center">
-                  <span className="text-2xl font-bold text-white">Rx</span>
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900">PharmaSaaS</h1>
-                  <p className="text-sm text-gray-600">Pharmacy Management System</p>
-                </div>
-              </div>
-              <div className="space-y-1 text-sm text-gray-600">
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-4 h-4" />
-                  <span>123 Medical Plaza, Healthcare District</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Phone className="w-4 h-4" />
-                  <span>+1 (555) 123-4567</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Mail className="w-4 h-4" />
-                  <span>contact@pharmasaas.com</span>
-                </div>
-              </div>
-            </div>
-
             {/* Right: Receipt Info */}
             <div className="text-right">
               <div className="inline-block px-4 py-2 bg-teal-50 border-2 border-teal-600 rounded-lg mb-3">
@@ -109,7 +88,7 @@ export function ReceiptVoucher({
             </div>
             <div>
               <p className="text-sm text-gray-500 mb-1">Account Balance Before Payment</p>
-              <p className="text-lg font-bold text-red-600">${accountBalanceBefore.toFixed(2)}</p>
+              <p className="text-lg font-bold text-red-600">{formatMoney(accountBalanceBefore)}</p>
             </div>
           </div>
         </div>
@@ -155,7 +134,7 @@ export function ReceiptVoucher({
               <div className="space-y-4">
                 <div>
                   <p className="text-sm text-teal-600 mb-1">Paid Amount</p>
-                  <p className="text-3xl font-bold text-teal-700">${amount.toFixed(2)}</p>
+                  <p className="text-3xl font-bold text-teal-700">{formatMoney(amount)}</p>
                 </div>
                 <div className="pt-4 border-t-2 border-teal-300">
                   <p className="text-sm text-teal-600 mb-1">Remaining Balance</p>
@@ -210,7 +189,7 @@ export function ReceiptVoucher({
               This is a computer-generated receipt and is valid without signature.
             </p>
             <p className="text-xs text-gray-400 mt-1">
-              © 2024 PharmaSaaS. All rights reserved.
+              This document uses the configured print identity shown above.
             </p>
           </div>
         </div>

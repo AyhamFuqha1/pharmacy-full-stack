@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
+use App\Http\Resources\SafeUserResource;
 use App\Models\User;
 use App\Services\AuthService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -28,25 +29,19 @@ class AuthController extends Controller
     try {
       $login = $this->authService->login($request);
       if ($login['status'] !== 200) {
-        return response()->json(
-          ['message' => $login['message']],
-          $login['status']
-        );
+        return $this->failure($login['message'], $login['status']);
       }
 
       $user = User::where('email', $request->email)->first();
 
-      return response()->json([
-        'message' => $login['message'],
+      return $this->success([
         'token' => $login['token'],
         'requires_password_change' => (bool) ($user?->force_change_password ?? false),
-      ], 200);
+      ], 200, $login['message']);
     } catch (Throwable $e) {
       report($e);
 
-      return response()->json([
-        'message' => 'Something went wrong.',
-      ], 500);
+      return $this->failure('Server error.', 500);
     }
   }
 
@@ -58,21 +53,16 @@ class AuthController extends Controller
       $register = $this->authService->register($request, $admin);
 
       if ($register) {
-        return response()->json(['message' => 'User created successfully.'], 200);
+        return $this->success((new SafeUserResource($register))->resolve(), 201, 'User created.');
       }
 
-      return response()->json(['message' => 'User creation failed.'], 500);
+      return $this->failure('User creation failed.', 500);
     } catch (AuthorizationException $e) {
-      return response()->json(
-        ['message' => 'You are not authorized to create users.'],
-        403
-      );
+      return $this->failure('Forbidden.', 403);
     } catch (Throwable $e) {
       report($e);
 
-      return response()->json([
-        'message' => 'Something went wrong.',
-      ], 500);
+      return $this->failure('Server error.', 500);
     }
   }
 
@@ -83,16 +73,14 @@ class AuthController extends Controller
     try {
       $logout = $this->authService->logout($user);
       if ($logout['status'] == 200) {
-        return response()->json($logout['message'], 200);
+        return $this->success(null, 200, $logout['message']);
       }
 
-      return response()->json(['message' => $logout['message'] ?? 'Unable to log out.'], $logout['status'] ?? 500);
+      return $this->failure($logout['message'] ?? 'Unable to log out.', $logout['status'] ?? 500);
     } catch (Throwable $e) {
       report($e);
 
-      return response()->json([
-        'message' => 'Something went wrong.',
-      ], 500);
+      return $this->failure('Server error.', 500);
     }
   }
 
@@ -106,13 +94,13 @@ class AuthController extends Controller
     $user = $request->user();
 
     if (! $user || ! Hash::check($validated['current_password'], $user->password)) {
-      return response()->json(['message' => 'Current password is incorrect.'], 422);
+      return $this->failure('Current password is incorrect.', 422, ['current_password' => ['Current password is incorrect.']]);
     }
 
     $user->password = Hash::make($validated['new_password']);
     $user->force_change_password = false;
     $user->save();
 
-    return response()->json(['message' => 'Password changed successfully.'], 200);
+    return $this->success(null, 200, 'Password changed successfully.');
   }
 }

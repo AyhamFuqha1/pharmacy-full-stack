@@ -6,6 +6,7 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\updateaProductRequest;
 use App\Models\Product;
 use App\Services\ProductService;
+use App\Services\ProductReportingService;
 use Illuminate\Http\Request; 
 
 use Throwable;
@@ -23,6 +24,7 @@ class ProductController extends Controller
     public function index(Request $request)
     {
         try {
+            $request->validate(['archive_status' => 'nullable|in:active,archived,all', 'is_controlled' => 'nullable|boolean', 'created_from' => 'nullable|date', 'created_to' => 'nullable|date|after_or_equal:created_from', 'sort' => 'nullable|in:name,created_at', 'direction' => 'nullable|in:asc,desc']);
             $products = $this->productService->index($request);
             if (!$products) {
                 return response()->json(
@@ -31,16 +33,10 @@ class ProductController extends Controller
                     200
                 );
             } else {
-                return response()->json(
-                    $products,
-                    200
-                );
+                return $this->collection($products, 'Products retrieved.');
             }
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            report($e); return $this->failure('Server error.', 500);
 
         }
     }
@@ -50,8 +46,7 @@ class ProductController extends Controller
     {
         $product = $this->productService->store($request);
         return response()->json([
-            'message' => 'Created',
-            'data' => $product
+            'success' => true, 'message' => 'Product created.', 'data' => $product
         ], 201);
     }
 
@@ -59,36 +54,28 @@ class ProductController extends Controller
     public function show($product)
     {
         try {
-            $products = $this->productService->show($product);
+            request()->validate(['archive_status' => ['nullable', 'in:active,archived,all']]);
+            $products = $this->productService->show($product, request('archive_status', 'active'));
             if (!$products) {
-                return response()->json(
-                    ["message" => "This Product Not Found"],
-                    200
-                );
+                return $this->failure('Product not found.', 404);
             } else {
-                return response()->json(
-                    $products,
-                    200
-                );
+                return $this->success($products, 200, 'Product retrieved.');
             }
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            report($e); return $this->failure('Server error.', 500);
 
         }
     }
 
-    public function scanBarcode(string $barcode)
+    public function scanBarcode(\Illuminate\Http\Request $request, string $barcode)
     {
-        $result = $this->productService->lookupByBarcode($barcode);
+        $result = $this->productService->lookupByBarcode($barcode, $request->integer('branch_id') ?: null);
 
         if (!$result) {
-            return response()->json(['message' => 'Product not found for this barcode.'], 404);
+            return $this->failure('Product not found for this barcode.', 404);
         }
 
-        return response()->json($result);
+        return $this->success($result, 200, 'Product retrieved.');
     }
 
 
@@ -99,21 +86,12 @@ class ProductController extends Controller
             $products = $this->productService->update($request, $product);
 
             if (!$products) {
-                return response()->json(
-                    ["message" => "This Product Not Found"],
-                    404
-                );
+                return $this->failure('Product not found.', 404);
             } else {
-                return response()->json(
-                    $products,
-                    200
-                );
+                return $this->success($products, 200, 'Product updated.');
             }
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            report($e); return $this->failure('Server error.', 500);
 
         }
     }
@@ -124,9 +102,37 @@ class ProductController extends Controller
     public function destroy($product)
     {
         $result = $this->productService->destroy($product);
-        return response()->json(
-            ["message"=>$result['message']],
-            $result['status']
-        );
+        return $result['status'] >= 400
+            ? $this->failure($result['message'], $result['status'])
+            : $this->success(null, $result['status'], $result['message']);
+    }
+
+    public function restore($product)
+    {
+        $result = $this->productService->restore($product);
+        return $result['status'] >= 400
+            ? $this->failure($result['message'], $result['status'])
+            : $this->success($result['data'], 200, $result['message']);
+    }
+
+    public function stockLedger(Request $request, int $id, ProductReportingService $reports)
+    {
+        $request->validate(['from' => 'nullable|date', 'to' => 'nullable|date|after_or_equal:from', 'batch_id' => 'nullable|integer', 'movement_type' => 'nullable|string|max:50', 'per_page' => 'nullable|integer|min:1|max:100']);
+        abort_unless(Product::withTrashed()->whereKey($id)->exists(), 404);
+        $ledger = $reports->stockLedger($id, $request);
+        if (! ($request->user()?->hasPermission('reports.view_cost') || $request->user()?->hasPermission('inventory.view_cost'))) {
+            $ledger->through(function ($row) {
+                unset($row->cost_basis);
+                return $row;
+            });
+        }
+        return $this->collection($ledger, 'Product stock ledger retrieved.');
+    }
+
+    public function report(Request $request, int $id, ProductReportingService $reports)
+    {
+        $request->validate(['from' => 'nullable|date', 'to' => 'nullable|date|after_or_equal:from', 'batch_id' => 'nullable|integer']);
+        abort_unless(Product::withTrashed()->whereKey($id)->exists(), 404);
+        return $this->success($reports->productReport($id, $request), 200, 'Product report retrieved.');
     }
 }

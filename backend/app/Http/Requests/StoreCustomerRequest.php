@@ -26,6 +26,9 @@ class StoreCustomerRequest extends FormRequest
             'phone_num' => 'required|string|max:20',
             'city' => 'nullable|string|max:255',
             'dept' => 'sometimes|numeric|min:0',
+            'credit_limit' => 'nullable|numeric|min:0',
+            'credit_warning_threshold' => 'nullable|numeric|min:0',
+            'block_on_limit' => 'sometimes|boolean',
         ];
     }
 }

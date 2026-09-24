@@ -7,14 +7,41 @@ use DB;
 class CustomerService
 {
 
-    public function index()
+    public function index($request = null)
     {
-        return DB::table('customers')->get();
+        $query = DB::table('customers');
+        $this->applyArchiveStatus($query, $request?->input('archive_status', 'active'));
+        if ($request?->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(fn ($builder) => $builder
+                ->where('name', 'like', "%{$search}%")
+                ->orWhere('phone_num', 'like', "%{$search}%"));
+        }
+        $query->when($request?->filled('name'), fn ($q) => $q->where('name', 'like', '%'.$request->name.'%'))
+            ->when($request?->filled('phone'), fn ($q) => $q->where('phone_num', 'like', '%'.$request->phone.'%'))
+            ->when($request?->filled('city'), fn ($q) => $q->where('city', 'like', '%'.$request->city.'%'))
+            ->when($request?->filled('created_from'), fn ($q) => $q->whereDate('created_at', '>=', $request->created_from))
+            ->when($request?->filled('created_to'), fn ($q) => $q->whereDate('created_at', '<=', $request->created_to));
+
+        $sort = in_array($request?->input('sort'), ['id', 'name', 'created_at'], true) ? $request->sort : 'id';
+        return $query->orderBy($sort, $request?->input('direction') === 'asc' ? 'asc' : 'desc')->paginate(min(max((int) ($request?->input('per_page', 15) ?? 15), 1), 100));
     }
 
-    public function show($id)
+    public function show($id, string $archiveStatus = 'active')
     {
-        return DB::table("customers")->where("id", $id)->first();
+        $customer = DB::table('customers')
+            ->where('id', $id)
+            ->when($archiveStatus === 'active', fn ($query) => $query->whereNull('deleted_at'))
+            ->when($archiveStatus === 'archived', fn ($query) => $query->whereNotNull('deleted_at'))
+            ->first();
+        if ($customer) {
+            $receivable=(float)app(AccountingReportService::class)->customerStatement((int)$customer->id)['balance'];
+            $customer->current_receivable=round($receivable,2);
+            $customer->available_credit=$customer->credit_limit===null?null:round((float)$customer->credit_limit-$receivable,2);
+            $customer->exceeded=$customer->credit_limit!==null&&$receivable>(float)$customer->credit_limit;
+            $customer->warning=$customer->credit_warning_threshold!==null&&$receivable>=(float)$customer->credit_warning_threshold;
+        }
+        return $customer;
     }
 
     public function store($customer)
@@ -24,20 +51,11 @@ class CustomerService
                 'name' => $customer['name'],
                 'phone_num' => $customer['phone_num'],
                 'city' => $customer['city'],
+                'credit_limit' => $customer['credit_limit'] ?? null,
+                'credit_warning_threshold' => $customer['credit_warning_threshold'] ?? null,
+                'block_on_limit' => $customer['block_on_limit'] ?? false,
             ]);
-            if ($customer->filled('dept')) {
-                DB::table('ledgers')->insert([
-                    'party_type' => 'supplier',
-                    'party_id' => $customerId,
-                    'transaction_type' => 'debit',
-                    'amount' => $customer->dept,
-                    'source_type' => 'purchase',
-                    'source_id' => 0,
-                    'description' => "Opening balance for customer",
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            }
+            // Customer balances are derived from posted journal entries, never a legacy ledger row.
             return true;
         });
 
@@ -81,49 +99,28 @@ class CustomerService
         return true;
     }
 
+    public function restore($id): array
+    {
+        $customer = DB::table('customers')->where('id', $id)->first();
+        if (!$customer) return ['message' => 'Customer not found.', 'status' => 404];
+        if ($customer->deleted_at === null) return ['message' => 'Customer is already active.', 'status' => 409];
+        DB::table('customers')->where('id', $id)->update(['deleted_at' => null]);
+        return ['message' => 'Customer restored.', 'status' => 200, 'data' => $this->show($id)];
+    }
+
+    private function applyArchiveStatus($query, string $status): void
+    {
+        if ($status === 'active') $query->whereNull('deleted_at');
+        if ($status === 'archived') $query->whereNotNull('deleted_at');
+    }
+
     public function incrementDept($id, $amount, $id_sales_invoices)
     {
-        $customer = DB::table("customers")->where('id', $id)->first();
-        if (!$customer) {
-            return false;
-        }
-        DB::table("customers")->where('id', $id)->increment('dept', $amount);
-        DB::table('ledgers')->insert([
-            'party_type' => 'customer',
-            'party_id' => $customer->id,
-            'transaction_type' => 'debit',
-            'amount' => $amount,
-            'source_type' => 'invoice',
-            'source_id' => $id_sales_invoices,
-            'description' => "Payment due from invoice #{$id_sales_invoices}"
-        ]);
-        return true;
+        throw new \LogicException('Customer balances are posted only through sales invoices and receipts.');
     }
     public function decrementDept($id, $amount, $id_sales_invoices)
     {
-        $customer = DB::table("customers")->where('id', $id)->first();
-        if (!$customer) {
-            return false;
-        }
-
-
-
-        DB::table("customers")->where('id', $id)->decrement('dept', $amount);
-
-
-        DB::table('ledgers')->insert([
-            'party_type' => 'customer',
-            'party_id' => $customer->id,
-            'transaction_type' => 'credit',
-            'amount' => $amount,
-            'source_type' => 'receipt',
-            'source_id' => $id_sales_invoices,
-            'description' => "Payment received for invoice #{$id_sales_invoices}",
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        return true;
+        throw new \LogicException('Customer balances are posted only through sales invoices and receipts.');
     }
 
 

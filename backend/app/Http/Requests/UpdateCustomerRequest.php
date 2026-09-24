@@ -25,6 +25,9 @@ class UpdateCustomerRequest extends FormRequest
         'name'      => 'sometimes|string|max:255',
         'phone_num' => 'sometimes|string|max:20',
         'city'      => 'nullable|string|max:255',
+        'credit_limit' => 'nullable|numeric|min:0',
+        'credit_warning_threshold' => 'nullable|numeric|min:0',
+        'block_on_limit' => 'sometimes|boolean',
     ];
 }
 

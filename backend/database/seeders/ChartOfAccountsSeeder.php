@@ -15,13 +15,18 @@ class ChartOfAccountsSeeder extends Seeder
             ['code' => '1200', 'name' => 'Bank', 'parent_code' => '1000', 'account_type' => 'asset', 'normal_balance' => 'debit'],
             ['code' => '1300', 'name' => 'Accounts Receivable', 'parent_code' => '1000', 'account_type' => 'asset', 'normal_balance' => 'debit'],
             ['code' => '1400', 'name' => 'Inventory Asset', 'parent_code' => '1000', 'account_type' => 'asset', 'normal_balance' => 'debit'],
+            ['code' => '1500', 'name' => 'Cheques Receivable', 'parent_code' => '1000', 'account_type' => 'asset', 'normal_balance' => 'debit'],
             ['code' => '2000', 'name' => 'Liabilities', 'account_type' => 'liability', 'normal_balance' => 'credit'],
             ['code' => '2100', 'name' => 'Accounts Payable', 'parent_code' => '2000', 'account_type' => 'liability', 'normal_balance' => 'credit'],
+            ['code' => '2200', 'name' => 'Cheques Payable', 'parent_code' => '2000', 'account_type' => 'liability', 'normal_balance' => 'credit'],
+            ['code' => '3000', 'name' => 'Equity', 'account_type' => 'equity', 'normal_balance' => 'credit'],
             ['code' => '4000', 'name' => 'Revenue', 'account_type' => 'revenue', 'normal_balance' => 'credit'],
             ['code' => '4100', 'name' => 'Sales Revenue', 'parent_code' => '4000', 'account_type' => 'revenue', 'normal_balance' => 'credit'],
+            ['code' => '4200', 'name' => 'Other Income', 'parent_code' => '4000', 'account_type' => 'revenue', 'normal_balance' => 'credit'],
             ['code' => '5000', 'name' => 'Expenses', 'account_type' => 'expense', 'normal_balance' => 'debit'],
             ['code' => '5100', 'name' => 'Cost of Goods Sold', 'parent_code' => '5000', 'account_type' => 'expense', 'normal_balance' => 'debit'],
             ['code' => '5200', 'name' => 'Operating Expenses', 'parent_code' => '5000', 'account_type' => 'expense', 'normal_balance' => 'debit'],
+            ['code' => '5300', 'name' => 'Inventory Adjustments', 'parent_code' => '5000', 'account_type' => 'expense', 'normal_balance' => 'debit'],
         ];
 
         foreach ($accounts as $definition) {

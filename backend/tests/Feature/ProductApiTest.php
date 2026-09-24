@@ -71,7 +71,7 @@ class ProductApiTest extends TestCase
         $response = $this->getJson('/api/product/' . $product->id);
 
         $response->assertOk();
-        $response->assertJsonPath('id', $product->id);
+        $response->assertJsonPath('success', true)->assertJsonPath('data.id', $product->id);
     }
 
     public function test_show_returns_not_found_for_missing_product(): void
@@ -80,8 +80,8 @@ class ProductApiTest extends TestCase
 
         $response = $this->getJson('/api/product/999999');
 
-        $response->assertOk();
-        $response->assertJson(['message' => 'This Product Not Found']);
+        $response->assertNotFound();
+        $response->assertJson(['success' => false, 'message' => 'Product not found.']);
     }
 
     public function test_show_does_not_return_soft_deleted_product(): void
@@ -93,8 +93,8 @@ class ProductApiTest extends TestCase
 
         $response = $this->getJson('/api/product/' . $product->id);
 
-        $response->assertOk();
-        $response->assertJson(['message' => 'This Product Not Found']);
+        $response->assertNotFound();
+        $response->assertJson(['success' => false, 'message' => 'Product not found.']);
     }
 
     public function test_valid_product_creation_succeeds(): void
@@ -109,6 +109,72 @@ class ProductApiTest extends TestCase
         $response->assertStatus(201);
         $response->assertJsonPath('data.name', 'Vitamin C');
         $this->assertDatabaseHas('products', ['name' => 'Vitamin C', 'barcode' => 'VITC-001']);
+    }
+
+    public function test_reorder_level_is_created_updated_reloaded_and_used_by_reorder_planning(): void
+    {
+        $this->authenticatedUser();
+
+        $created = $this->postJson('/api/product', [
+            'name' => 'Product A',
+            'barcode' => 'REORDER-A',
+            'reorder_level' => 10.125,
+        ])->assertCreated()->assertJsonPath('data.reorder_level', 10.125);
+
+        $productId = $created->json('data.id');
+        $this->putJson('/api/product/' . $productId, [
+            'reorder_level' => 110,
+        ])->assertOk()->assertJsonPath('data.reorder_level', 110);
+
+        $this->getJson('/api/product/' . $productId)
+            ->assertOk()
+            ->assertJsonPath('data.reorder_level', 110);
+
+        $branchId = \Illuminate\Support\Facades\DB::table('branches')->insertGetId([
+            'name' => 'Main',
+            'code' => 'MAIN',
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        \Illuminate\Support\Facades\DB::table('product_batches')->insert([
+            'product_id' => $productId,
+            'branch_id' => $branchId,
+            'batch_number' => 'REORDER-A-MAIN',
+            'expiry_date' => now()->addYear()->toDateString(),
+            'purchase_price' => 1,
+            'sale_price' => 2,
+            'quantity' => 107,
+            'inventory_state' => 'available',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/inventory/reorder?branch_id=' . $branchId)
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $productId,
+                'name' => 'Product A',
+                'current_sellable_stock' => 107,
+                'reorder_level' => 110,
+            ]);
+    }
+
+    public function test_reorder_level_rejects_negative_and_excess_precision_values(): void
+    {
+        $this->authenticatedUser();
+
+        $this->postJson('/api/product', [
+            'name' => 'Negative threshold',
+            'barcode' => 'REORDER-NEG',
+            'reorder_level' => -1,
+        ])->assertUnprocessable()->assertJsonValidationErrors('reorder_level');
+
+        $this->postJson('/api/product', [
+            'name' => 'Precise threshold',
+            'barcode' => 'REORDER-PRECISE',
+            'reorder_level' => 1.2345,
+        ])->assertUnprocessable()->assertJsonValidationErrors('reorder_level');
     }
 
     public function test_creation_validation_rejects_missing_name(): void
@@ -236,8 +302,8 @@ class ProductApiTest extends TestCase
 
         $response = $this->getJson('/api/product/' . $product->id);
 
-        $response->assertOk();
-        $response->assertJson(['message' => 'This Product Not Found']);
+        $response->assertNotFound();
+        $response->assertJson(['success' => false, 'message' => 'Product not found.']);
     }
 
     public function test_deleted_product_cannot_be_updated(): void

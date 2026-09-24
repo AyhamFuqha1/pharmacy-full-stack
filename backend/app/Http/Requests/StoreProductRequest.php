@@ -28,6 +28,7 @@ class StoreProductRequest extends FormRequest
             'barcode' => 'required|string|max:50|unique:products,barcode,' . $this->route('product'),
             'is_controlled' => 'sometimes|boolean',
             'control_schedule' => 'nullable|string|max:30|required_if:is_controlled,1',
+            'reorder_level' => 'sometimes|numeric|min:0|decimal:0,3',
         ];
 
     }

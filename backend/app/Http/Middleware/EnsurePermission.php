@@ -7,9 +7,12 @@ use Illuminate\Http\Request;
 
 class EnsurePermission
 {
-    public function handle(Request $request, Closure $next, string $permission)
+    public function handle(Request $request, Closure $next, string ...$permissions)
     {
-        abort_unless($request->user()?->hasPermission($permission), 403);
+        $authorized = collect($permissions)
+            ->contains(fn (string $permission) => $request->user()?->hasPermission($permission));
+
+        abort_unless($authorized, 403);
         return $next($request);
     }
 }

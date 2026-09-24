@@ -1,41 +1,35 @@
-import { BarChart3, TrendingUp, PieChart, LineChart } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { ApiClientError } from '../../api/client';
+import { dashboardApi, reportsApi } from '../../api/reports';
+import { systemApi } from '../../api/system';
+import { useAuth } from '../../auth/useAuth';
+import type { DashboardDto, IncomeStatementDto, InventoryValuationDto } from '../../types/reports';
+import type { AdvancedAuditDto } from '../../types/system';
+import { formatDateOnly, formatMoney } from '../../utils/batchFormatters';
+import i18n from '../../i18n';
+
+interface SourceState<T> { data: T | null; error: ApiClientError | null; }
+const emptySource = <T,>(): SourceState<T> => ({ data: null, error: null });
 
 export function AnalyticsPage() {
-  return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Analytics</h1>
-        <p className="text-gray-600">Business intelligence and insights</p>
-      </div>
-
-      {/* Placeholder Card */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-12 text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-teal-100 rounded-full mb-4">
-          <BarChart3 className="w-8 h-8 text-teal-600" />
-        </div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Advanced Analytics</h2>
-        <p className="text-gray-600 mb-6 max-w-md mx-auto">
-          This feature is coming soon. You'll have access to comprehensive analytics, custom reports, and business intelligence dashboards.
-        </p>
-        <div className="flex items-center justify-center gap-4 text-sm text-gray-500">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" />
-            <span>Sales Trends</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <PieChart className="w-4 h-4" />
-            <span>Market Share</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <LineChart className="w-4 h-4" />
-            <span>Growth Metrics</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4" />
-            <span>Custom Reports</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const { t } = useTranslation();
+  const { hasPermission } = useAuth(); const canDashboard = hasPermission('dashboard.view'), canAccounting = hasPermission('accounting.reports'), canAudit = hasPermission('audits.view');
+  const [dashboard, setDashboard] = useState<SourceState<DashboardDto>>(emptySource), [income, setIncome] = useState<SourceState<IncomeStatementDto>>(emptySource), [valuation, setValuation] = useState<SourceState<InventoryValuationDto>>(emptySource), [audit, setAudit] = useState<SourceState<AdvancedAuditDto>>(emptySource);
+  const [loading, setLoading] = useState(true), [reload, setReload] = useState(0);
+  useEffect(() => { const controller = new AbortController(); setLoading(true); const tasks: Promise<void>[] = []; if (canDashboard) tasks.push(dashboardApi.detail(controller.signal).then(data => setDashboard({ data, error: null })).catch(value => setDashboard({ data: null, error: normalize(value) }))); if (canAccounting) { tasks.push(reportsApi.incomeStatement({}, controller.signal).then(data => setIncome({ data, error: null })).catch(value => setIncome({ data: null, error: normalize(value) }))); tasks.push(reportsApi.inventoryValuation({}, controller.signal).then(data => setValuation({ data, error: null })).catch(value => setValuation({ data: null, error: normalize(value) }))); } if (canAudit) tasks.push(systemApi.audit({ per_page: 1 }, controller.signal).then(data => setAudit({ data, error: null })).catch(value => setAudit({ data: null, error: normalize(value) }))); Promise.allSettled(tasks).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [canDashboard, canAccounting, canAudit, reload]);
+  const anyPermission = canDashboard || canAccounting || canAudit;
+  return <div className="p-8"><h1 className="text-3xl font-bold">{t('Analytics')}</h1><p className="text-gray-500 mb-8">{t('Persisted operational and accounting aggregates')}</p>{!anyPermission && <div className="p-8 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl">{t('No analytics data sources are permitted for this account.')}</div>}{loading ? <div className="grid md:grid-cols-3 gap-5" aria-label={t('Loading analytics…')}>{[1,2,3].map(value => <div key={value} className="h-40 bg-gray-100 animate-pulse rounded-2xl" />)}</div> : <div className="space-y-8">{canDashboard && <SourceSection error={dashboard.error} retry={() => setReload(v => v + 1)}>{dashboard.data && <DashboardAnalytics data={dashboard.data} />}</SourceSection>}{canAccounting && <SourceSection error={income.error ?? valuation.error} retry={() => setReload(v => v + 1)}>{income.data && valuation.data && <AccountingAnalytics income={income.data} valuation={valuation.data} />}</SourceSection>}{canAudit && <SourceSection error={audit.error} retry={() => setReload(v => v + 1)}>{audit.data && <AuditAnalytics data={audit.data} />}</SourceSection>}</div>}</div>;
 }
+
+function DashboardAnalytics({ data }: { data: DashboardDto }) { const{t}=useTranslation();return <section><Header title="Operations Today" subtitle={t('backendSnapshotFor',{date:formatDateOnly(data.today)})} /><div className="grid md:grid-cols-3 gap-5 mb-5"><Metric label="Today's sales" value={formatMoney(data.todays_sales)} /><Metric label="Today's profit" value={formatMoney(data.todays_profit)} /><Metric label="Expiring batches" value={String(data.expiring_batches.length)} /></div><div className="grid lg:grid-cols-2 gap-5"><ChartCard title="Top-selling products today">{data.top_selling_products.length ? <ResponsiveContainer width="100%" height={280}><BarChart data={data.top_selling_products}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip formatter={(value)=>[value,t('Quantity')]} /><Bar dataKey="quantity" fill="#0d9488" /></BarChart></ResponsiveContainer> : <Empty text="No product sales recorded today." />}</ChartCard><TableCard title="Expiring inventory" heads={['Product / Batch','Expiry','Quantity']} rows={data.expiring_batches.map(item => [`${item.product_name} / ${item.batch_number}`, formatDateOnly(item.expiry_date), String(item.quantity)])} /></div><div className="grid lg:grid-cols-2 gap-5 mt-5"><TableCard title="Customer balances" heads={['Customer','Backend balance']} rows={data.customer_balances.map(item => [item.name, formatMoney(item.balance)])} /><TableCard title="Supplier balances" heads={['Supplier','Backend balance']} rows={data.supplier_balances.map(item => [item.name, formatMoney(item.balance)])} /></div></section>; }
+function AccountingAnalytics({ income, valuation }: { income: IncomeStatementDto; valuation: InventoryValuationDto }) { return <section><Header title="Accounting Summary" subtitle="All values are returned by posted-ledger reports" /><div className="grid md:grid-cols-4 gap-5"><Metric label="Revenue" value={formatMoney(income.revenue)} /><Metric label="Expenses" value={formatMoney(income.expenses)} /><Metric label="Net income" value={formatMoney(income.net_income)} /><Metric label="Inventory valuation" value={formatMoney(valuation.value)} /></div></section>; }
+function AuditAnalytics({ data }: { data: AdvancedAuditDto }) { const{t}=useTranslation(),actions = data.summary.by_action.map(item => ({ name: item.action_type ? t(item.action_type.replaceAll('_',' ').replace(/\b\w/g,l=>l.toUpperCase())) : t('Unspecified'), total: Number(item.total) })); return <section><Header title="Audit and Controlled Dispensing" subtitle="Persisted aggregate activity" /><div className="grid md:grid-cols-3 gap-5 mb-5"><Metric label="Controlled prescriptions" value={String(data.controlled_medicine_dispensing.prescription_count)} /><Metric label="Allowed quantity" value={String(data.controlled_medicine_dispensing.allowed_quantity)} /><Metric label="Dispensed quantity" value={String(data.controlled_medicine_dispensing.dispensed_quantity)} /></div><div className="grid lg:grid-cols-2 gap-5"><ChartCard title="Audit records by action">{actions.length ? <ResponsiveContainer width="100%" height={280}><BarChart data={actions}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip formatter={(value)=>[value,t('Records')]} /><Bar dataKey="total" fill="#6366f1" /></BarChart></ResponsiveContainer> : <Empty text="No audit action aggregates are available." />}</ChartCard><TableCard title="Audit records by entity" heads={['Entity table','Records']} rows={data.summary.by_table.map(item => [item.table_name || t('Unspecified'), String(item.total)])} /></div></section>; }
+function SourceSection({ error, retry, children }: { error: ApiClientError | null; retry: () => void; children: React.ReactNode }) { const{t}=useTranslation();if (!error) return <>{children}</>; return <div className="p-5 bg-red-50 border border-red-200 text-red-700 rounded-2xl"><strong>{t(error.status === 403 ? 'Analytics source access denied' : error.status === 0 ? 'Connection failure' : 'Analytics source unavailable')}</strong><p>{error.message}</p><button onClick={retry} className="mt-2 underline">{t('Retry')}</button></div>; }
+function Header({ title, subtitle }: { title: string; subtitle: string }) { const{t}=useTranslation();return <div className="mb-5"><h2 className="text-2xl font-bold">{t(title)}</h2><p className="text-gray-500">{t(subtitle)}</p></div>; }
+function Metric({ label, value }: { label: string; value: string }) { const{t}=useTranslation();return <div className="bg-white border rounded-2xl p-5"><p className="text-sm text-gray-500">{t(label)}</p><p className="text-3xl font-bold mt-2"><bdi dir="ltr">{value}</bdi></p></div>; }
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) { const{t}=useTranslation();return <div className="bg-white border rounded-2xl p-5"><h3 className="font-bold mb-4">{t(title)}</h3>{children}</div>; }
+function TableCard({ title, heads, rows }: { title: string; heads: string[]; rows: string[][] }) { const{t}=useTranslation();return <div className="bg-white border rounded-2xl overflow-hidden"><h3 className="font-bold p-5 border-b">{t(title)}</h3>{rows.length ? <div className="overflow-x-auto"><table className="w-full"><thead className="bg-gray-50"><tr>{heads.map(head => <th key={head} className="p-3">{t(head)}</th>)}</tr></thead><tbody className="divide-y">{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} className="p-3">{cellIndex>0?<bdi dir="ltr">{cell}</bdi>:cell}</td>)}</tr>)}</tbody></table></div> : <Empty text="No persisted rows are available." />}</div>; }
+function Empty({ text }: { text: string }) { const{t}=useTranslation();return <div className="p-10 text-center text-gray-500">{t(text)}</div>; }
+function normalize(value: unknown): ApiClientError { return value instanceof ApiClientError ? value : new ApiClientError(500, i18n.t('An unexpected server error occurred. Please try again.')); }

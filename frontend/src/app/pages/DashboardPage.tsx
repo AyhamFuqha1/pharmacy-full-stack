@@ -1,94 +1,30 @@
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { AlertTriangle, DollarSign, Package, TrendingUp } from 'lucide-react';
+import { dashboardApi } from '../../api/reports';
+import { ApiClientError } from '../../api/client';
+import type { DashboardDto, NotificationDto } from '../../types/reports';
+import { formatMoney } from '../../utils/batchFormatters';
 import { KPICard } from '../components/KPICard';
-import { SalesChart } from '../components/SalesChart';
-import { InventoryRiskChart } from '../components/InventoryRiskChart';
-import { RevenueChart } from '../components/RevenueChart';
-import { InventoryTable } from '../components/InventoryTable';
 import { NotificationPanel } from '../components/NotificationPanel';
-import {
-  DollarSign,
-  TrendingUp,
-  AlertTriangle,
-  PackageX,
-  TrendingDown,
-} from 'lucide-react';
+import { useAuth } from '../../auth/useAuth';
 
 export function DashboardPage() {
-  return (
-    <div className="p-8">
-      {/* Page Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Dashboard Overview</h1>
-        <p className="text-gray-500">Welcome back! Here's what's happening with your pharmacy today.</p>
-      </div>
-
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-        <KPICard
-          title="Total Sales Today"
-          value="$12,458"
-          change="+12.5%"
-          isPositive={true}
-          icon={DollarSign}
-          iconColor="bg-teal-600"
-        />
-        <KPICard
-          title="Total Revenue"
-          value="$84,290"
-          change="+8.2%"
-          isPositive={true}
-          icon={TrendingUp}
-          iconColor="bg-emerald-500"
-        />
-        <KPICard
-          title="Expiring Soon"
-          value="23"
-          change="+3"
-          isPositive={false}
-          icon={AlertTriangle}
-          iconColor="bg-red-500"
-        />
-        <KPICard
-          title="High Risk Inventory"
-          value="12"
-          change="-2"
-          isPositive={true}
-          icon={PackageX}
-          iconColor="bg-orange-500"
-        />
-        <KPICard
-          title="Low Stock Products"
-          value="8"
-          change="+1"
-          isPositive={false}
-          icon={TrendingDown}
-          iconColor="bg-amber-500"
-        />
-      </div>
-
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <div className="lg:col-span-2">
-          <SalesChart />
-        </div>
-        <div>
-          <InventoryRiskChart />
-        </div>
-      </div>
-
-      {/* Revenue Chart */}
-      <div className="mb-8">
-        <RevenueChart />
-      </div>
-
-      {/* Bottom Section: Inventory Table + Notifications */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <InventoryTable />
-        </div>
-        <div>
-          <NotificationPanel />
-        </div>
-      </div>
-    </div>
-  );
+  const { t, i18n } = useTranslation();
+  const { hasPermission } = useAuth();
+  const [data, setData] = useState<DashboardDto | null>(null);
+  const [notifications, setNotifications] = useState<NotificationDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiClientError | null>(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => { const controller = new AbortController(); setLoading(true); setError(null); Promise.all([dashboardApi.detail(controller.signal), dashboardApi.notifications(controller.signal)]).then(([dashboard, alerts]) => { setData(dashboard); setNotifications(alerts); }).catch((value: unknown) => { if (!(value instanceof DOMException && value.name === 'AbortError')) setError(value instanceof ApiClientError ? value : new ApiClientError(0, t('Unable to load dashboard.'))); }).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [reload]);
+  if (loading) return <div className="p-4 sm:p-8"><div className="grid md:grid-cols-4 gap-6">{[1,2,3,4].map(i => <div key={i} className="h-40 rounded-2xl bg-gray-100 animate-pulse" />)}</div></div>;
+  if (error || !data) return <div className="p-4 sm:p-8"><div className="p-6 bg-red-50 border border-red-200 rounded-2xl text-red-700"><h1 className="font-bold">{t(error?.status === 403 ? 'Dashboard access denied' : 'Dashboard unavailable')}</h1><p>{error?.message}</p>{error?.status !== 403 && <button onClick={() => setReload(v => v + 1)} className="mt-3 px-4 py-2 bg-red-600 text-white rounded-xl">{t('Retry')}</button>}</div></div>;
+  const locale=i18n.resolvedLanguage==='ar'?'ar':'en';
+  const financial = hasPermission('reports.view_financial') || hasPermission('accounting.reports');
+  return <div className="p-4 sm:p-8"><div className="mb-8"><h1 className="text-3xl font-bold">{t('Dashboard Overview')}</h1><p className="text-gray-500">{t('verifiedNetActivityFor',{date:formatDashboardDate(data.today,locale)})}</p></div><div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">{financial&&<KPICard title={t("Today's Net Sales")} value={formatMoney(data.todays_net_sales)} icon={DollarSign} iconColor="bg-teal-600" />}{hasPermission('reports.view_profit')&&<KPICard title={t("Today's Gross Profit")} value={formatMoney(data.todays_gross_profit)} icon={TrendingUp} iconColor="bg-emerald-500" />}{hasPermission('reports.view_profit')&&<KPICard title={t("Today's Gross Margin")} value={`${Number(data.todays_gross_margin_percent).toFixed(2)}%`} icon={TrendingUp} iconColor="bg-emerald-600" />}{hasPermission('reports.view_profit')&&<KPICard title={t("Today's Expenses")} value={formatMoney(data.todays_expenses)} icon={DollarSign} iconColor="bg-amber-600" />}{hasPermission('reports.view_profit')&&<KPICard title={t("Today's Net Profit")} value={formatMoney(data.todays_net_profit)} icon={TrendingUp} iconColor="bg-green-700" />}{hasPermission('reports.view_cost')&&<KPICard title={t('Inventory Value')} value={formatMoney(data.inventory_value.value)} icon={Package} iconColor="bg-blue-500" />}<KPICard title={t('Expiring Batches')} value={String(data.expiring_batches.length)} icon={AlertTriangle} iconColor="bg-red-500" /></div><div className="grid lg:grid-cols-3 gap-6 mb-8"><div className="lg:col-span-2 bg-white border rounded-2xl overflow-hidden"><Header title={t('Top-selling products today')} subtitle={t('Backend net quantity after same-day returns')} />{data.top_selling_products.length ? <Table heads={[t('Product'),t('Net quantity')]} rows={data.top_selling_products.map(p => [p.name, String(p.quantity)])} /> : <Empty text={t('No net product sales recorded today.')} />}</div><NotificationPanel notifications={notifications} /></div><div className="grid lg:grid-cols-2 gap-6"><div className="bg-white border rounded-2xl overflow-hidden"><Header title={t('Expiring batches')} subtitle={t('Within the backend alert window')} />{data.expiring_batches.length ? <Table heads={[t('Product / Batch'),t('Expiry'),t('Qty')]} rows={data.expiring_batches.map(b => [`${b.product_name} / ${b.batch_number}`, formatDashboardDate(b.expiry_date,locale), String(b.quantity)])} /> : <Empty text={t('No batches are expiring soon.')} />}</div>{financial&&<div className="bg-white border rounded-2xl overflow-hidden"><Header title={t('Party balances')} subtitle={t('Authoritative accounting balances')} /><Table heads={[t('Party'),t('Type'),t('Balance')]} rows={[...data.customer_balances.map(p => [p.name,t('Customer'),formatMoney(p.balance)]), ...data.supplier_balances.map(p => [p.name,t('Supplier'),formatMoney(p.balance)])]} /></div>}</div></div>;
 }
+function formatDashboardDate(value:string,locale:'ar'|'en'){const match=/^(\d{4})-(\d{2})-(\d{2})/.exec(value);if(!match)return value;return new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeZone:'UTC'}).format(new Date(Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3]))));}
+function Header({ title, subtitle }: { title: string; subtitle: string }) { return <div className="p-5 border-b"><h2 className="font-bold">{title}</h2><p className="text-sm text-gray-500">{subtitle}</p></div>; }
+function Table({ heads, rows }: { heads: string[]; rows: string[][] }) { const {t}=useTranslation();return rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[520px]"><thead className="bg-gray-50 text-xs uppercase"><tr>{heads.map(h => <th className="p-4" key={h}>{h}</th>)}</tr></thead><tbody className="divide-y">{rows.map((row,i) => <tr key={i}>{row.map((cell,j) => <td className="p-4" key={j}>{j>0?<bdi dir="ltr">{cell}</bdi>:cell}</td>)}</tr>)}</tbody></table></div> : <Empty text={t('No balances to display.')} />; }
+function Empty({ text }: { text: string }) { return <div className="p-10 text-center text-gray-500">{text}</div>; }

@@ -11,7 +11,7 @@ class StorePaymentVoucherRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return false;
+        return true;
     }
 
     /**
@@ -22,7 +22,16 @@ class StorePaymentVoucherRequest extends FormRequest
     public function rules(): array
     {
         return [
-            //
+            'provider_id' => 'required|exists:providers,id',
+            'amount' => 'required|numeric|gt:0',
+            'date' => 'required|date',
+            'payment_method' => 'required|in:cash,cheque',
+            'cheque_number' => 'required_if:payment_method,cheque|nullable|string|max:50',
+            'bank' => 'required_if:payment_method,cheque|nullable|string|max:100',
+            'due_date' => 'required_if:payment_method,cheque|nullable|date',
+            'allocations' => 'nullable|array',
+            'allocations.*.invoice_id' => 'required|integer|exists:purchase_invoices,id',
+            'allocations.*.amount' => 'required|numeric|gt:0',
         ];
     }
 }

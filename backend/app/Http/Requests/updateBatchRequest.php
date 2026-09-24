@@ -24,7 +24,7 @@ class updateBatchRequest extends FormRequest
         return [
             'product_id' => 'sometimes|exists:products,id',
             'batch_number' => 'sometimes|string|max:100|unique:product_batches,batch_number,' . $this->route('product_batch'),
-            'expiry_date' => 'sometimes|date|after_or_equal:today',
+            'expiry_date' => 'sometimes|nullable|date|after_or_equal:today',
             'quantity' => 'sometimes|integer|min:0',
             'purchase_price' => 'sometimes|numeric|min:0',
             'sale_price' => 'sometimes|numeric|gt:purchase_price',

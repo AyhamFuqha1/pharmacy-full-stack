@@ -1,426 +1,325 @@
-import { useState } from 'react';
-import { Search, X, Plus, Scan, ShoppingCart, Trash2 } from 'lucide-react';
-
-interface OrderItem {
-  id: string;
-  productName: string;
-  batchNumber: string;
-  amount: number;
-  price: number;
-  discount: number;
-  total: number;
-}
-
-interface Customer {
-  id: string;
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Plus, Scan, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { ApiClientError } from '../../api/client';
+import { customersApi } from '../../api/customers';
+import { productsApi } from '../../api/products';
+import { salesApi } from '../../api/sales';
+import { useAuth } from '../../auth/useAuth';
+import type { CustomerDto } from '../../types/party';
+import type { BarcodeLookupDto, ProductDto } from '../../types/product';
+import type { SalesLinePayload, SalesPaymentMethod, SalesPayload } from '../../types/sales';
+import { formatMoney } from '../../utils/batchFormatters';
+type UnitChoice = {
+  id: number | null;
   name: string;
-  phone: string;
-}
-
-const mockCustomers: Customer[] = [
-  { id: '1', name: 'John Smith', phone: '+1 234-567-8900' },
-  { id: '2', name: 'Sarah Johnson', phone: '+1 234-567-8901' },
-  { id: '3', name: 'Michael Brown', phone: '+1 234-567-8902' },
-  { id: '4', name: 'Emily Davis', phone: '+1 234-567-8903' },
-];
-
-const mockProducts = [
-  { name: 'Paracetamol 500mg', batch: 'BT-2024-001', price: 5.99, barcode: '1234567890123' },
-  { name: 'Ibuprofen 400mg', batch: 'BT-2024-002', price: 7.49, barcode: '1234567890124' },
-  { name: 'Amoxicillin 250mg', batch: 'BT-2024-003', price: 12.99, barcode: '1234567890125' },
-  { name: 'Aspirin 100mg', batch: 'BT-2024-004', price: 4.99, barcode: '1234567890126' },
-  { name: 'Omeprazole 20mg', batch: 'BT-2024-005', price: 9.99, barcode: '1234567890127' },
-];
-
+  symbol: string;
+  factor: number;
+  price: number;
+};
+type SaleLine = {
+  key: number;
+  product_id: string;
+  barcode?: string;
+  amount: string;
+  unit_id: string;
+  units: UnitChoice[];
+  normal_price: string;
+  price: string;
+  discount_type: 'fixed' | 'percentage';
+  discount_value: string;
+  discount_reason: string;
+  available: number;
+  loading: boolean;
+};
+const emptyLine = (key: number): SaleLine => ({
+  key,
+  product_id: '',
+  amount: '1',
+  unit_id: '',
+  units: [],
+  normal_price: '0',
+  price: '0',
+  discount_type: 'fixed',
+  discount_value: '0',
+  discount_reason: '',
+  available: 0,
+  loading: false
+});
 export function CreateOrderPage() {
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [orderDiscount, setOrderDiscount] = useState(0);
-  const [paidAmount, setPaidAmount] = useState('');
-  const [barcodeInput, setBarcodeInput] = useState('');
-  const [items, setItems] = useState<OrderItem[]>([]);
-
-  const filteredCustomers = mockCustomers.filter(
-    (customer) =>
-      customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-      customer.phone.includes(customerSearch)
-  );
-
-  const handleBarcodeInput = (barcode: string) => {
-    const product = mockProducts.find((p) => p.barcode === barcode);
-    if (product) {
-      addItem(product.name, product.batch, product.price);
-      setBarcodeInput('');
-    }
+  const navigate = useNavigate(),
+    {
+      hasPermission
+    } = useAuth(),
+    canOverride = hasPermission('sales.override_price'),
+    canDiscount = hasPermission('sales.discount');
+  const [customers, setCustomers] = useState<CustomerDto[]>([]),
+    [products, setProducts] = useState<ProductDto[]>([]),
+    [loading, setLoading] = useState(true),
+    [customerId, setCustomerId] = useState(''),
+    [date, setDate] = useState(new Date().toISOString().slice(0, 10)),
+    [paymentMethod, setPaymentMethod] = useState<SalesPaymentMethod>('cash'),
+    [paidAmount, setPaidAmount] = useState('0'),
+    [lines, setLines] = useState<SaleLine[]>([emptyLine(1)]),
+    [discountType, setDiscountType] = useState<'fixed' | 'percentage'>('fixed'),
+    [discountValue, setDiscountValue] = useState('0'),
+    [discountReason, setDiscountReason] = useState(''),
+    [cheque, setCheque] = useState({
+      number: '',
+      bank: '',
+      due_date: ''
+    }),
+    [barcode, setBarcode] = useState(''),
+    [error, setError] = useState<ApiClientError | null>(null),
+    [submitting, setSubmitting] = useState(false);
+  const [customerSummary, setCustomerSummary] = useState<CustomerDto | null>(null),
+    [customerLoading, setCustomerLoading] = useState(false),
+    [customerError, setCustomerError] = useState(''),
+    [creditOverrideReason, setCreditOverrideReason] = useState('');
+  const customerRequest = useRef(0);
+  useEffect(() => {
+    const c = new AbortController();
+    Promise.all([loadCustomers(c.signal), loadProducts(c.signal)]).then(([a, b]) => {
+      setCustomers(a);
+      setProducts(b);
+    }).catch(v => setError(v instanceof ApiClientError ? v : new ApiClientError(0, 'Unable to load sale choices.'))).finally(() => setLoading(false));
+    return () => c.abort();
+  }, []);
+  useEffect(() => {
+    void selectCustomer(customerId);
+  }, [customerId]);
+  const lineNet = (line: SaleLine) => {
+    const gross = Number(line.amount) * Number(line.price),
+      value = Number(line.discount_value || 0);
+    return Math.max(0, gross - (line.discount_type === 'percentage' ? gross * value / 100 : value));
   };
-
-  const addItem = (productName = '', batchNumber = '', price = 0) => {
-    const newItem: OrderItem = {
-      id: Date.now().toString(),
-      productName,
-      batchNumber,
-      amount: 1,
-      price,
-      discount: 0,
-      total: price,
-    };
-    setItems([...items, newItem]);
-  };
-
-  const removeItem = (id: string) => {
-    setItems(items.filter((item) => item.id !== id));
-  };
-
-  const updateItem = (id: string, field: keyof OrderItem, value: any) => {
-    setItems(
-      items.map((item) => {
-        if (item.id === id) {
-          const updated = { ...item, [field]: value };
-          // Recalculate total
-          const subtotal = updated.amount * updated.price;
-          updated.total = subtotal - (subtotal * updated.discount) / 100;
-          return updated;
-        }
-        return item;
-      })
-    );
-  };
-
-  const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-  const discountAmount = (subtotal * orderDiscount) / 100;
-  const totalAmount = subtotal - discountAmount;
-
-  const handleCreateOrder = () => {
-    // Mock order creation
-    console.log('Order created:', {
-      customer: selectedCustomer,
-      date: orderDate,
-      paymentMethod,
-      discount: orderDiscount,
-      paidAmount: parseFloat(paidAmount),
-      items,
-      total: totalAmount,
-      createdBy: 'Admin User', // This would come from JWT in production
+  const subtotal = useMemo(() => lines.reduce((sum, line) => sum + lineNet(line), 0), [lines]),
+    invoiceDiscount = discountType === 'percentage' ? subtotal * Number(discountValue || 0) / 100 : Number(discountValue || 0),
+    total = Math.max(0, subtotal - invoiceDiscount);
+  const patchLine = (key: number, values: Partial<SaleLine>) => setLines(current => current.map(line => line.key === key ? {
+    ...line,
+    ...values
+  } : line));
+  async function chooseProduct(key: number, productId: string, barcodeValue?: string) {
+    patchLine(key, {
+      product_id: productId,
+      barcode: barcodeValue,
+      unit_id: '',
+      units: [],
+      normal_price: '0',
+      price: '0',
+      discount_type: 'fixed',
+      discount_value: '0',
+      discount_reason: '',
+      available: 0,
+      loading: true
     });
-    alert('Order created successfully!');
-  };
-
-  return (
-    <div className="p-8">
-      {/* Page Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-          <span>Dashboard</span>
-          <span>/</span>
-          <span className="text-teal-600 font-medium">Create Order</span>
-        </div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Create New Order</h1>
-        <p className="text-gray-500">Enter order details and add products to create a new order</p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Order Form */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Customer Selection */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Customer Information</h3>
-            <div className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Select Customer *</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  value={selectedCustomer ? selectedCustomer.name : customerSearch}
-                  onChange={(e) => {
-                    setCustomerSearch(e.target.value);
-                    setShowCustomerDropdown(true);
-                    setSelectedCustomer(null);
-                  }}
-                  onFocus={() => setShowCustomerDropdown(true)}
-                  placeholder="Search customer by name or phone..."
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                />
-              </div>
-
-              {/* Customer Dropdown */}
-              {showCustomerDropdown && !selectedCustomer && (
-                <div className="absolute z-10 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                  {filteredCustomers.length > 0 ? (
-                    filteredCustomers.map((customer) => (
-                      <button
-                        key={customer.id}
-                        onClick={() => {
-                          setSelectedCustomer(customer);
-                          setShowCustomerDropdown(false);
-                          setCustomerSearch('');
-                        }}
-                        className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0"
-                      >
-                        <p className="font-medium text-gray-900">{customer.name}</p>
-                        <p className="text-sm text-gray-500">{customer.phone}</p>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-4 py-3 text-center text-gray-500">No customers found</div>
-                  )}
-                </div>
-              )}
-
-              {selectedCustomer && (
-                <div className="mt-3 p-3 bg-teal-50 border border-teal-200 rounded-xl flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">{selectedCustomer.name}</p>
-                    <p className="text-sm text-gray-600">{selectedCustomer.phone}</p>
-                  </div>
-                  <button
-                    onClick={() => setSelectedCustomer(null)}
-                    className="p-1 hover:bg-teal-100 rounded-lg transition-colors"
-                  >
-                    <X className="w-5 h-5 text-teal-600" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Barcode Scanner */}
-          <div className="bg-gradient-to-br from-teal-50 to-emerald-50 border border-teal-200 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-emerald-500 rounded-xl flex items-center justify-center">
-                <Scan className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 className="font-bold text-gray-900">Quick Add Product</h3>
-                <p className="text-sm text-gray-600">Scan or type barcode to add product</p>
-              </div>
-            </div>
-            <input
-              type="text"
-              value={barcodeInput}
-              onChange={(e) => setBarcodeInput(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter' && barcodeInput) {
-                  handleBarcodeInput(barcodeInput);
-                }
-              }}
-              placeholder="Scan or enter barcode..."
-              className="w-full px-4 py-3 bg-white border border-teal-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-            />
-          </div>
-
-          {/* Items Table */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">Order Items</h3>
-                <p className="text-sm text-gray-500">{items.length} item(s) added</p>
-              </div>
-              <button
-                onClick={() => addItem()}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-teal-600 to-emerald-500 text-white rounded-xl hover:from-teal-700 hover:to-emerald-600 transition-all shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="font-medium">Add Item</span>
-              </button>
-            </div>
-
-            {items.length === 0 ? (
-              <div className="p-12 text-center">
-                <ShoppingCart className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">No items added yet</p>
-                <p className="text-sm text-gray-400 mt-1">Use barcode scanner or click "Add Item" to start</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Batch</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Qty</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Price</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Disc %</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Total</th>
-                      <th className="px-4 py-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {items.map((item) => (
-                      <tr key={item.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <input
-                            type="text"
-                            value={item.productName}
-                            onChange={(e) => updateItem(item.id, 'productName', e.target.value)}
-                            placeholder="Product name"
-                            className="w-full px-2 py-1 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="text"
-                            value={item.batchNumber}
-                            onChange={(e) => updateItem(item.id, 'batchNumber', e.target.value)}
-                            placeholder="Batch"
-                            className="w-full px-2 py-1 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono text-sm"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="number"
-                            value={item.amount}
-                            onChange={(e) => updateItem(item.id, 'amount', parseFloat(e.target.value) || 0)}
-                            min="1"
-                            className="w-20 px-2 py-1 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="number"
-                            value={item.price}
-                            onChange={(e) => updateItem(item.id, 'price', parseFloat(e.target.value) || 0)}
-                            min="0"
-                            step="0.01"
-                            className="w-24 px-2 py-1 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="number"
-                            value={item.discount}
-                            onChange={(e) => updateItem(item.id, 'discount', parseFloat(e.target.value) || 0)}
-                            min="0"
-                            max="100"
-                            className="w-20 px-2 py-1 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-semibold text-gray-900">${item.total.toFixed(2)}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => removeItem(item.id)}
-                            className="p-2 hover:bg-red-50 rounded-lg transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-500" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Order Details & Summary */}
-        <div className="space-y-6">
-          {/* Order Details */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Order Details</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Order Date</label>
-                <input
-                  type="date"
-                  value={orderDate}
-                  onChange={(e) => setOrderDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
-                <select
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                >
-                  <option value="cash">Cash</option>
-                  <option value="card">Credit/Debit Card</option>
-                  <option value="mobile">Mobile Payment</option>
-                  <option value="insurance">Insurance</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Order Discount (%)</label>
-                <input
-                  type="number"
-                  value={orderDiscount}
-                  onChange={(e) => setOrderDiscount(parseFloat(e.target.value) || 0)}
-                  min="0"
-                  max="100"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Created By</label>
-                <input
-                  type="text"
-                  value="Admin User"
-                  disabled
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-500 cursor-not-allowed"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Order Summary */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Order Summary</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between text-gray-600">
-                <span>Subtotal</span>
-                <span className="font-semibold">${subtotal.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-gray-600">
-                <span>Discount ({orderDiscount}%)</span>
-                <span className="font-semibold text-red-500">-${discountAmount.toFixed(2)}</span>
-              </div>
-              <div className="border-t border-gray-200 pt-3">
-                <div className="flex justify-between">
-                  <span className="text-lg font-bold text-gray-900">Total</span>
-                  <span className="text-2xl font-bold text-teal-600">${totalAmount.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="pt-3">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Paid Amount</label>
-                <input
-                  type="number"
-                  value={paidAmount}
-                  onChange={(e) => setPaidAmount(e.target.value)}
-                  placeholder="0.00"
-                  step="0.01"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-              </div>
-
-              {paidAmount && parseFloat(paidAmount) >= totalAmount && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                  <p className="text-sm font-medium text-emerald-700">
-                    Change: ${(parseFloat(paidAmount) - totalAmount).toFixed(2)}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={handleCreateOrder}
-              disabled={!selectedCustomer || items.length === 0}
-              className="w-full mt-6 py-3 bg-gradient-to-r from-teal-600 to-emerald-500 text-white rounded-xl hover:from-teal-700 hover:to-emerald-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md font-semibold"
-            >
-              Create Order
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+    const product = products.find(p => p.id === Number(productId));
+    if (!product) {
+      patchLine(key, {
+        loading: false
+      });
+      return;
+    }
+    try {
+      const info = (await productsApi.lookupBarcode(product.barcode)).data;
+      const choices: UnitChoice[] = info.sale_units.map(unit => ({
+          id: unit.id,
+          name: unit.name,
+          symbol: unit.symbol,
+          factor: Number(unit.base_quantity),
+          price: Number(unit.sale_price ?? 0)
+        })),
+        base = info.base_unit ?? info.sale_units.find(unit => Boolean(unit.is_base));
+      if (!base) {
+        patchLine(key, {
+          loading: false,
+          available: Number(info.available_sellable_stock || 0)
+        });
+        setError(new ApiClientError(422, `${product.name} has no base sale unit configured. Add one in Product Units / Packaging before selling it.`));
+        return;
+      }
+      const basePrice = Number(base.sale_price ?? info.default_price);
+      patchLine(key, {
+        units: choices,
+        unit_id: String(base.id),
+        normal_price: String(basePrice),
+        price: String(basePrice),
+        available: Number(info.available_sellable_stock || 0),
+        loading: false
+      });
+    } catch (value) {
+      patchLine(key, {
+        loading: false
+      });
+      setError(value instanceof ApiClientError ? value : new ApiClientError(0, 'Unable to load product pricing.'));
+    }
+  }
+  function chooseUnit(line: SaleLine, value: string) {
+    const selected = line.units.find(unit => String(unit.id ?? '') === value) ?? line.units[0],
+      price = String(selected?.price ?? 0);
+    patchLine(line.key, {
+      unit_id: value,
+      normal_price: price,
+      price
+    });
+  }
+  async function scan() {
+    if (!barcode.trim()) return;
+    try {
+      const info: BarcodeLookupDto = (await productsApi.lookupBarcode(barcode.trim())).data;
+      const key = Date.now();
+      setLines(current => [...current.filter(line => line.product_id), emptyLine(key)]);
+      setBarcode('');
+      setTimeout(() => void chooseProduct(key, String(info.product.id), info.product.barcode), 0);
+    } catch (value) {
+      setError(value instanceof ApiClientError ? value : new ApiClientError(0, 'Barcode lookup failed.'));
+    }
+  }
+  async function selectCustomer(value: string) {
+    const request = ++customerRequest.current;
+    setCustomerId(value);
+    setCustomerSummary(null);
+    setCustomerError('');
+    setCreditOverrideReason('');
+    if (!value) {
+      setCustomerLoading(false);
+      return;
+    }
+    setCustomerLoading(true);
+    try {
+      const summary = (await customersApi.detail(Number(value))).data;
+      if (request === customerRequest.current) setCustomerSummary(summary);
+    } catch (value) {
+      if (request === customerRequest.current) setCustomerError(value instanceof ApiClientError && value.status === 403 ? 'Credit information is unavailable for your role.' : 'Unable to load customer credit information.');
+    } finally {
+      if (request === customerRequest.current) setCustomerLoading(false);
+    }
+  }
+  async function complete() {
+    if (!customerId || !lines.length || lines.some(line => !line.product_id || Number(line.amount) < 1) || total <= 0 || Number(paidAmount) < 0 || Number(paidAmount) > total) {
+      setError(new ApiClientError(422, 'Check the customer, items, quantities, discounts and paid amount.'));
+      return;
+    }
+    if (Number(discountValue) > 0 && !discountReason.trim()) {
+      setError(new ApiClientError(422, 'Invoice discount reason is required.'));
+      return;
+    }
+    if (paymentMethod === 'cheque' && (!cheque.number || !cheque.bank || !cheque.due_date)) {
+      setError(new ApiClientError(422, 'Cheque number, bank and due date are required.'));
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const payload: SalesPayload = {
+      customer_id: Number(customerId),
+      date,
+      discount: invoiceDiscount,
+      invoice_discount_type: discountType,
+      invoice_discount_value: Number(discountValue || 0),
+      invoice_discount_reason: discountReason || undefined,
+      paid_amount: Number(paidAmount || 0),
+      payment_method: paymentMethod,
+      cheque_number: cheque.number || undefined,
+      cheque_bank: cheque.bank || undefined,
+      cheque_due_date: cheque.due_date || undefined,
+      credit_override_reason: creditOverrideReason || undefined,
+      items: lines.map((line): SalesLinePayload => ({
+        product_id: Number(line.product_id),
+        amount: Number(line.amount),
+        ...(line.unit_id ? {
+          unit_id: Number(line.unit_id)
+        } : {}),
+        price: Number(line.price),
+        discount: 0,
+        discount_type: line.discount_type,
+        discount_value: Number(line.discount_value || 0),
+        discount_reason: line.discount_reason || undefined
+      }))
+    };
+    try {
+      const response = await salesApi.create(payload);
+      navigate(`/sales/${response.data.id}`, {
+        replace: true,
+        state: {
+          success: 'Sale completed with FEFO inventory and accounting posting.'
+        }
+      });
+    } catch (value) {
+      setError(value instanceof ApiClientError ? value : new ApiClientError(0, 'Unable to complete sale.'));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  return <div className="p-4 sm:p-8 space-y-6"><button onClick={() => navigate('/sales')} className="flex gap-2 text-gray-600"><ArrowLeft /> Back to Sales</button><div><h1 className="text-3xl font-bold">Create Sale</h1><p className="text-gray-500">Package pricing is loaded automatically; Laravel remains authoritative for FEFO and totals.</p></div>{error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-800">{error.message}</div>}<section className="bg-white border rounded-2xl p-5 space-y-4"><label><span className="block text-sm font-medium mb-2">Customer</span><select className="input" disabled={loading} value={customerId} onChange={e => setCustomerId(e.target.value)}><option value="">Select customer</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}{customer.phone_num ? ` — ${customer.phone_num}` : ''}</option>)}</select></label>{customerLoading && <p className="text-sm text-gray-500">Loading customer credit…</p>}{customerError && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{customerError} The sale form remains available.</p>}{customerSummary && <div className="grid gap-3 sm:grid-cols-4"><Credit label="Current Receivable" value={formatMoney(Number(customerSummary.current_receivable || 0))} /><Credit label="Credit Limit" value={customerSummary.credit_limit == null ? 'Not configured' : formatMoney(Number(customerSummary.credit_limit))} /><Credit label="Available Credit" value={customerSummary.available_credit == null ? '—' : formatMoney(Number(customerSummary.available_credit))} /><Credit label="Credit Status" value={customerSummary.exceeded ? 'Exceeded' : customerSummary.warning ? 'Near limit' : 'Within limit'} tone={customerSummary.exceeded ? 'danger' : customerSummary.warning ? 'warning' : 'normal'} /></div>}{customerSummary?.exceeded && hasPermission('customer.credit_override') && <Field label="Credit Override Reason"><input className="input" value={creditOverrideReason} onChange={e => setCreditOverrideReason(e.target.value)} /></Field>}</section><section className="bg-teal-50 border border-teal-200 rounded-2xl p-5"><div className="flex gap-2 items-center mb-3"><Scan /><strong>Barcode</strong></div><form className="flex gap-2" onSubmit={e => {
+        e.preventDefault();
+        void scan();
+      }}><input className="input bg-white" value={barcode} onChange={e => setBarcode(e.target.value)} placeholder="Scan product barcode" /><button className="report-action primary">Add</button></form></section><section className="bg-white border rounded-2xl overflow-hidden"><div className="p-5 border-b flex justify-between"><div><h2 className="font-bold text-lg">Sale Items</h2><p className="text-sm text-gray-500">Each line keeps its own product, package, price and discount.</p></div><button className="report-action primary" onClick={() => setLines(value => [...value, emptyLine(Date.now())])}><Plus size={16} /> Add Item</button></div><div className="grid gap-4 p-4">{lines.map(line => {
+          const selected = line.units.find(unit => String(unit.id ?? '') === line.unit_id) ?? line.units[0];
+          return <div className="grid gap-3 rounded-xl border p-4 lg:grid-cols-7" key={line.key}><Field label="Product"><select className="input" value={line.product_id} onChange={e => void chooseProduct(line.key, e.target.value)}><option value="">Select product</option>{products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</select></Field><Field label="Quantity"><input className="input" type="number" min="1" step="1" value={line.amount} onChange={e => patchLine(line.key, {
+                amount: e.target.value
+              })} /></Field><Field label="Unit / Packaging"><select className="input" disabled={!line.units.length || line.loading} value={line.unit_id} onChange={e => chooseUnit(line, e.target.value)}>{line.units.map(unit => <option key={unit.id ?? 'base'} value={unit.id ?? ''}>{unit.name} ({unit.factor} base)</option>)}</select></Field><Field label="Unit Price"><input className="input" type="number" min="0" step="0.01" readOnly={!canOverride} value={line.price} onChange={e => patchLine(line.key, {
+                price: e.target.value
+              })} /></Field><Field label="Discount"><input className="input" type="number" min="0" step="0.01" readOnly={!canDiscount} value={line.discount_value} onChange={e => patchLine(line.key, {
+                discount_value: e.target.value
+              })} /></Field><Field label="Discount Type"><select className="input" disabled={!canDiscount} value={line.discount_type} onChange={e => patchLine(line.key, {
+                discount_type: e.target.value as SaleLine['discount_type']
+              })}><option value="fixed">Fixed</option><option value="percentage">Percentage</option></select></Field><div><p className="text-sm text-gray-500">Line Total</p><strong>{formatMoney(lineNet(line))}</strong><button className="block mt-3 text-red-600" onClick={() => setLines(value => value.filter(item => item.key !== line.key))}><Trash2 size={17} /></button></div><div className="lg:col-span-7 text-sm text-gray-600">Available: {line.available} {line.units[0]?.symbol || 'base units'}{selected && selected.factor > 1 ? ` · ${Math.floor(line.available / selected.factor)} ${selected.name}` : ''}</div>{Number(line.discount_value) > 0 && <Field label="Line Discount Reason"><input required className="input" value={line.discount_reason} onChange={e => patchLine(line.key, {
+                discount_reason: e.target.value
+              })} /></Field>}</div>;
+        })}</div></section><section className="grid gap-5 lg:grid-cols-2"><div className="bg-white border rounded-2xl p-5 grid gap-4 sm:grid-cols-2"><Field label="Sale Date"><input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} /></Field><Field label="Payment Method"><select className="input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as SalesPaymentMethod)}><option value="cash">Cash</option><option value="cheque">Cheque</option><option value="visa">Visa / Bank</option></select></Field><Field label="Amount Paid"><input className="input" type="number" min="0" step="0.01" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} /></Field>{paymentMethod === 'cheque' && <><Field label="Cheque Number"><input className="input" value={cheque.number} onChange={e => setCheque({
+              ...cheque,
+              number: e.target.value
+            })} /></Field><Field label="Bank"><input className="input" value={cheque.bank} onChange={e => setCheque({
+              ...cheque,
+              bank: e.target.value
+            })} /></Field><Field label="Due Date"><input className="input" type="date" value={cheque.due_date} onChange={e => setCheque({
+              ...cheque,
+              due_date: e.target.value
+            })} /></Field></>}</div><div className="bg-white border rounded-2xl p-5"><div className="grid gap-3 sm:grid-cols-2"><Field label="Invoice Discount Type"><select className="input" disabled={!canDiscount} value={discountType} onChange={e => setDiscountType(e.target.value as typeof discountType)}><option value="fixed">Fixed</option><option value="percentage">Percentage</option></select></Field><Field label="Invoice Discount Value"><input className="input" readOnly={!canDiscount} type="number" min="0" step="0.01" value={discountValue} onChange={e => setDiscountValue(e.target.value)} /></Field>{Number(discountValue) > 0 && <Field label="Invoice Discount Reason"><input className="input" value={discountReason} onChange={e => setDiscountReason(e.target.value)} /></Field>}</div><Summary label="Subtotal after line discounts" value={subtotal} /><Summary label="Invoice Discount" value={invoiceDiscount} /><Summary label="Total" value={total} /><Summary label="Amount Paid" value={Number(paidAmount || 0)} /><Summary label="Balance Due" value={Math.max(0, total - Number(paidAmount || 0))} /><button disabled={submitting || loading} className="w-full mt-5 py-3 rounded-xl bg-teal-600 text-white disabled:opacity-50" onClick={() => void complete()}>{submitting ? 'Completing Sale…' : 'Complete Sale'}</button></div></section></div>;
+}
+function Field({
+  label,
+  children
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return <label><span className="block text-sm font-medium mb-2">{label}</span>{children}</label>;
+}
+function Summary({
+  label,
+  value
+}: {
+  label: string;
+  value: number;
+}) {
+  return <p className="flex justify-between py-2 border-b"><span>{label}</span><strong>{formatMoney(value)}</strong></p>;
+}
+function Credit({label,value,tone='normal'}:{label:string;value:string;tone?:'normal'|'warning'|'danger'}) {
+  return <div className={`rounded-xl p-3 ${tone==='danger'?'bg-red-50 text-red-800':tone==='warning'?'bg-amber-50 text-amber-800':'bg-gray-50'}`}><p className="text-xs opacity-70">{label}</p><strong>{value}</strong></div>;
+}
+async function loadCustomers(signal: AbortSignal) {
+  const rows: CustomerDto[] = [];
+  for (let page = 1;; page++) {
+    const response = await customersApi.list({
+      page,
+      per_page: 100
+    }, signal);
+    rows.push(...response.data);
+    if (page >= (response.meta.last_page ?? page)) return rows;
+  }
+}
+async function loadProducts(signal: AbortSignal) {
+  const rows: ProductDto[] = [];
+  for (let page = 1;; page++) {
+    const response = await productsApi.list({
+      page,
+      per_page: 100,
+      sort: 'name',
+      direction: 'asc'
+    }, signal);
+    rows.push(...response.data);
+    if (page >= (response.meta.last_page ?? page)) return rows;
+  }
 }

@@ -11,7 +11,7 @@ class ChequeRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return false;
+        return true;
     }
 
     /**
@@ -26,6 +26,9 @@ class ChequeRequest extends FormRequest
             'bank_name' => ['required', 'string', 'max:100'],
             'amount' => ['required', 'numeric', 'min:0.01'],
             'due_date' => ['required', 'date', 'after_or_equal:today'],
+            'direction' => ['required', 'in:in,out'],
+            'reference_type' => ['required', 'string', 'max:100'],
+            'reference_id' => ['nullable', 'integer', 'min:1'],
         ];
     }
 

@@ -9,21 +9,32 @@ class AdvancedAuditReportService
 {
     public function generate(array $filters): array
     {
-        $base = DB::table('audit_logs');
+        $base = DB::table('audit_logs')->leftJoin('users', 'users.id', '=', 'audit_logs.user_id')
+            ->select('audit_logs.*', 'users.name as actor_name', 'users.email as actor_email');
         $this->applyAuditFilters($base, $filters);
 
         $perPage = max(1, min((int) ($filters['per_page'] ?? 25), 100));
-        $logs = (clone $base)->orderByDesc('created_at')->paginate($perPage);
+        $logs = (clone $base)->orderByDesc('audit_logs.created_at')->paginate($perPage);
+        $logs->through(function ($log) {
+            $log->actor = $log->user_id ? ['id' => $log->user_id, 'name' => $log->actor_name, 'email' => $log->actor_email] : null;
+            $log->entity_type = $log->model_name ?: $log->table_name;
+            $log->entity_label = str(class_basename($log->entity_type))->headline()->toString();
+            $log->timestamp = $log->created_at;
+            $log->old_values = $this->safeValues($log->old_values ?: $log->old_data);
+            $log->new_values = $this->safeValues($log->new_values ?: $log->new_data);
+            unset($log->actor_name, $log->actor_email, $log->old_data, $log->new_data);
+            return $log;
+        });
 
         $byAction = (clone $base)
-            ->select('action_type', DB::raw('COUNT(*) as total'))
-            ->groupBy('action_type')
+            ->select('audit_logs.action_type', DB::raw('COUNT(*) as total'))
+            ->groupBy('audit_logs.action_type')
             ->orderByDesc('total')
             ->get();
 
         $byTable = (clone $base)
-            ->select('table_name', DB::raw('COUNT(*) as total'))
-            ->groupBy('table_name')
+            ->select('audit_logs.table_name', DB::raw('COUNT(*) as total'))
+            ->groupBy('audit_logs.table_name')
             ->orderByDesc('total')
             ->get();
 
@@ -57,19 +68,27 @@ class AdvancedAuditReportService
     private function applyAuditFilters(Builder $query, array $filters): void
     {
         if (!empty($filters['from'])) {
-            $query->whereDate('created_at', '>=', $filters['from']);
+            $query->whereDate('audit_logs.created_at', '>=', $filters['from']);
         }
         if (!empty($filters['to'])) {
-            $query->whereDate('created_at', '<=', $filters['to']);
+            $query->whereDate('audit_logs.created_at', '<=', $filters['to']);
         }
         if (!empty($filters['user_id'])) {
-            $query->where('user_id', (int) $filters['user_id']);
+            $query->where('audit_logs.user_id', (int) $filters['user_id']);
         }
         if (!empty($filters['table_name'])) {
-            $query->where('table_name', $filters['table_name']);
+            $query->where('audit_logs.table_name', $filters['table_name']);
         }
         if (!empty($filters['action_type'])) {
-            $query->where('action_type', $filters['action_type']);
+            $query->where('audit_logs.action_type', $filters['action_type']);
         }
+    }
+
+    private function safeValues($json): ?array
+    {
+        if (!$json) return null;
+        $values = is_array($json) ? $json : json_decode($json, true);
+        if (!is_array($values)) return null;
+        return collect($values)->except(['password', 'remember_token', 'token', 'api_token', 'access_token'])->all();
     }
 }

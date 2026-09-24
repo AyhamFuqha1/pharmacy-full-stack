@@ -28,7 +28,7 @@ class ProductionReadinessTest extends TestCase
 
         $response = $this->actingAs($user, 'sanctum')->getJson('/api/product?search=Amox&per_page=1');
 
-        $response->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.name', 'Amoxicillin');
+        $response->assertOk()->assertJsonPath('success', true)->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.name', 'Amoxicillin');
     }
 
     public function test_health_endpoint_confirms_database_connectivity(): void

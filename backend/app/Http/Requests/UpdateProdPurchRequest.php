@@ -33,7 +33,7 @@ class UpdateProdPurchRequest extends FormRequest
             'items.*.id' => 'nullable|exists:prod_purch,id',
             'items.*.product_id' => 'sometimes|exists:products,id',
             'items.*.batch_number' => 'sometimes|string|max:100',
-            'items.*.expire_date' => 'sometimes|date|after:today',
+            'items.*.expire_date' => 'sometimes|nullable|date|after:today',
             'items.*.amount' => 'sometimes|integer|min:1',
             'items.*.purchase_price' => 'sometimes|numeric|min:0',
             'items.*.selling_price' => 'sometimes|numeric|min:0',

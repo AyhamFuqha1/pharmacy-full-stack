@@ -145,19 +145,19 @@ class AccountingPostingTest extends TestCase
             'purchase_invoice_id' => $invoiceId, 'batch_id' => $batch->id,
             'amount' => 10, 'price' => 5, 'discount' => 0,
         ]);
-        DB::table('purch_returns')->insert([
+        $returnId = DB::table('purch_returns')->insertGetId([
             'invoice_id' => $invoiceId, 'invoice_item_id' => $lineId, 'batch_id' => $batch->id,
-            'quantity' => 2, 'return_price' => 50, 'cost_price' => 5,
-            'line_total_return' => 50, 'created_by' => $this->user->id,
-            'created_at' => now(), 'updated_at' => now(),
+            'quantity' => 2, 'return_price' => 5, 'cost_price' => 5,
+            'line_total_return' => 10, 'created_by' => $this->user->id,
+            'created_at' => '2026-08-15 10:00:00', 'updated_at' => '2026-08-15 10:00:00',
         ]);
 
-        $entry = app(AccountingPostingService::class)->postPurchaseReturn($invoiceId);
+        $entry = app(AccountingPostingService::class)->postPurchaseReturn($returnId);
 
         $this->assertTrue($entry->isBalanced());
         $this->assertSame($this->accounts['payable'], $entry->lines->firstWhere('side', 'debit')->account_id);
         $this->assertSame($this->accounts['inventory'], $entry->lines->firstWhere('side', 'credit')->account_id);
-        $this->assertSame(50.0, (float) $entry->total_debit);
+        $this->assertSame(10.0, (float) $entry->total_debit);
         $this->assertSame(10, $batch->fresh()->quantity);
     }
 
@@ -184,7 +184,7 @@ class AccountingPostingTest extends TestCase
         DB::table('invoice_returns')->insert([
             'invoice_id' => $invoiceId, 'product_id' => $product->id, 'batch_id' => $batch->id,
             'quantity' => 1, 'price' => 40, 'reason' => 'Test return',
-            'created_at' => now(), 'updated_at' => now(),
+            'created_at' => '2026-08-15 12:00:00', 'updated_at' => '2026-08-15 12:00:00',
         ]);
 
         $entry = app(AccountingPostingService::class)->postSalesReturn($invoiceId);

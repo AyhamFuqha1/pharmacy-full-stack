@@ -13,6 +13,7 @@ class ProductBatch extends Model
 
     protected $fillable = [
         'product_id',
+        'branch_id',
         'batch_number',
         'expiry_date',
         'quantity',
@@ -24,7 +25,7 @@ class ProductBatch extends Model
         'quantity' => 'integer',
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
-        'expiry_date' => 'date',
+        'expiry_date' => 'date:Y-m-d',
     ];
 
     public function product()
@@ -41,8 +42,10 @@ class ProductBatch extends Model
     {
         return $query
             ->whereNull('deleted_at')
+            ->where('inventory_state', 'available')
             ->where('quantity', '>', 0)
-            ->whereDate('expiry_date', '>=', now()->toDateString())
+            ->where(fn ($query) => $query->whereNull('expiry_date')->orWhereDate('expiry_date', '>=', now()->toDateString()))
+            ->orderByRaw('CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END')
             ->orderBy('expiry_date', 'asc')
             ->orderBy('id', 'asc');
     }
@@ -50,11 +53,12 @@ class ProductBatch extends Model
     public function isSellable(): bool
     {
         return $this->deleted_at === null
+            && $this->inventory_state === 'available'
             && $this->quantity > 0
-            && $this->expiry_date >= now()->toDateString();
+            && ($this->expiry_date === null || $this->expiry_date->toDateString() >= now()->toDateString());
     }
 
-    public function applyPurchase(int $quantity, float $unitCost): self
+    public function applyPurchase(int $quantity, float $unitCost, ?int $referenceId = null, ?int $userId = null, ?int $branchId = null): self
     {
         if ($quantity <= 0) {
             throw new InvalidArgumentException('Purchase quantity must be greater than zero.');
@@ -78,18 +82,19 @@ class ProductBatch extends Model
 
         Stock::query()->create([
             'batch_id' => $this->id,
+            'branch_id' => $branchId ?? $this->branch_id,
             'quantity' => $quantity,
             'type' => 'PURCHASE_IN',
             'reference_type' => 'purchase',
-            'reference_id' => null,
-            'user_id' => auth()->id(),
+            'reference_id' => $referenceId,
+            'user_id' => $userId ?? auth()->id(),
             'created_at' => now(),
         ]);
 
         return $this;
     }
 
-    public function applySale(int $quantity): self
+    public function applySale(int $quantity, ?int $referenceId = null, ?int $userId = null): self
     {
         if ($quantity <= 0) {
             throw new InvalidArgumentException('Sale quantity must be greater than zero.');
@@ -107,20 +112,40 @@ class ProductBatch extends Model
             'quantity' => $quantity,
             'type' => 'SALE_OUT',
             'reference_type' => 'sale',
-            'reference_id' => null,
-            'user_id' => auth()->id(),
+            'reference_id' => $referenceId,
+            'user_id' => $userId ?? auth()->id(),
             'created_at' => now(),
         ]);
 
         return $this;
     }
 
-    public static function findOrCreateBatch(int $productId, string $batchNumber, string $expiryDate, float $purchasePrice, float $salePrice): self
+    public function applyPrescriptionDispense(int $quantity, int $prescriptionId, int $userId): self
+    {
+        if ($quantity <= 0 || $quantity > (int) $this->quantity || !$this->isSellable()) {
+            throw new InvalidArgumentException('Batch cannot satisfy the prescription dispense allocation.');
+        }
+
+        $this->decrement('quantity', $quantity);
+        Stock::query()->create([
+            'batch_id' => $this->id,
+            'quantity' => $quantity,
+            'type' => 'PRESCRIPTION_DISPENSE_OUT',
+            'reference_type' => 'prescription_dispense',
+            'reference_id' => $prescriptionId,
+            'user_id' => $userId,
+            'created_at' => now(),
+        ]);
+
+        return $this->refresh();
+    }
+
+    public static function findOrCreateBatch(int $productId, string $batchNumber, ?string $expiryDate, float $purchasePrice, float $salePrice): self
     {
         $batch = static::query()
             ->where('product_id', $productId)
             ->where('batch_number', $batchNumber)
-            ->whereDate('expiry_date', $expiryDate)
+            ->when($expiryDate, fn ($query, $date) => $query->whereDate('expiry_date', $date), fn ($query) => $query->whereNull('expiry_date'))
             ->first();
 
         if ($batch) {

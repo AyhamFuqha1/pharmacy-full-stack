@@ -2,115 +2,46 @@
 
 namespace App\Services;
 
-use DB;
+use Illuminate\Support\Facades\DB;
 
-class ExpenseService
+class ExpressService
 {
-    const TABLE = 'expenses';
+    public function index() { return DB::table('expenses')->get(); }
+    public function show($id) { return DB::table('expenses')->where('id', $id)->first(); }
 
-    public function index()
-    {
-        return DB::table(self::TABLE)->get();
-    }
-
-    public function show($id)
-    {
-        return DB::table(self::TABLE)->where('id', $id)->first();
-    }
-
-    public function store($request, $user)
+    public function store($request, $user): int
     {
         return DB::transaction(function () use ($request, $user) {
-
-            $expenseId = DB::table(self::TABLE)->insertGetId([
+            $id = DB::table('expenses')->insertGetId([
+                'document_number' => app(DocumentNumberService::class)->next('expense','EXP'),
                 'amount' => $request->amount,
-                'category' => $request->category,
-                'type' => $request->payment_type,
-                'account_id' => $request->account_id,
-                'notes' => $request->notes,
+                'type' => $request->payment_type === 'bank' ? 'bank' : 'cash',
+                'payment_method' => $request->payment_type,
+                'branch_id' => $request->branch_id ?? null,
+                'expense_account_id' => $request->expense_account_id ?? DB::table('accounts')->where('code','5200')->value('id'),
+                'description' => $request->description,
+                'external_reference' => $request->external_reference ?? null,
+                'notes' => $request->notes ?? $request->description,
                 'date' => $request->expense_date,
                 'user_id' => $user->id,
+                'status' => 'posted',
                 'created_at' => now(),
+                'updated_at' => now(),
             ]);
-
-            DB::table('ledgers')->insert([
-                'party_type' => 'expense',
-                'party_id' => $expenseId,
-                'transaction_type' => 'debit',
-                'amount' => $request->amount,
-                'source_type' => 'expense',
-                'source_id' => $expenseId,
-                'description' => 'Expense: ' . $request->category,
-                'created_at' => now(),
-            ]);
-
-
-
-            $this->decreaseBalance(
-                $request->payment_type,
-                $request->account_id,
-                $request->amount
-            );
-
-            return $expenseId;
+            app(AccountingPostingService::class)->postExpense($id);
+            app(PrintIdentityService::class)->capture('expense', $id);
+            return $id;
         });
     }
 
-    public function destroy($id)
+    public function destroy($id, $user = null): array
     {
-        return DB::transaction(function () use ($id) {
-
-            $expense = DB::table(self::TABLE)->where('id', $id)->first();
-
-            if (!$expense) {
-                throw new \Exception("Expense not found");
-            }
-
-
-            DB::table('ledgers')
-                ->where('reference_type', 'expense')
-                ->where('reference_id', $id)
-                ->delete();
-
-
-            $this->increaseBalance(
-                $expense->payment_type,
-                $expense->account_id,
-                $expense->amount
-            );
-
-
-            DB::table(self::TABLE)->where('id', $id)->delete();
+        return DB::transaction(function () use ($id, $user) {
+            $expense = DB::table('expenses')->where('id', $id)->lockForUpdate()->first();
+            if (!$expense || $expense->status === 'cancelled') return ['status' => false, 'message' => 'Expense not found or already cancelled'];
+            app(AccountingPostingService::class)->reverseEvent('expense', $expense->id, $expense->date, ($user ?? auth()->user())->id, 'Expense cancellation');
+            DB::table('expenses')->where('id', $id)->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+            return ['status' => true, 'message' => 'Expense cancelled'];
         });
-    }
-
-
-
-    private function decreaseBalance($type, $accountId, $amount)
-    {
-        $table = $this->resolveAccountTable($type);
-
-        DB::table($table)
-            ->where('id', $accountId)
-            ->decrement('balance', $amount);
-    }
-
-    private function increaseBalance($type, $accountId, $amount)
-    {
-        $table = $this->resolveAccountTable($type);
-
-        DB::table($table)
-            ->where('id', $accountId)
-            ->increment('balance', $amount);
-    }
-
-    private function resolveAccountTable($type)
-    {
-        return match ($type) {
-            'cash' => 'cash_accounts',
-            'bank' => 'bank_accounts',
-            'check' => 'checks',
-            default => throw new \Exception('Invalid payment type'),
-        };
     }
 }

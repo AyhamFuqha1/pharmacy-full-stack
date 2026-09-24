@@ -7,6 +7,10 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class StoreInvoiceReturnRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        $items=collect($this->input('items',[]))->map(function($item){if(isset($item['transaction_quantity'])&&!isset($item['quantity'])){$line=DB::table('prod_sales')->where(['sales_invoice_id'=>$item['invoice_id']??null,'batch_id'=>$item['batch_id']??null])->first();if($line&&$line->transaction_quantity){$factor=(float)$line->base_quantity/(float)$line->transaction_quantity;$item['quantity']=(int)round((float)$item['transaction_quantity']*$factor);}}return$item;})->all();$this->merge(['items'=>$items]);
+    }
     /**
      * Determine if the user is authorized to make this request.
      */
@@ -31,7 +35,10 @@ class StoreInvoiceReturnRequest extends FormRequest
             'items.*.batch_id' => ['required', 'integer', 'exists:product_batches,id'],
 
             'items.*.quantity' => ['required', 'integer', 'min:1'],
-            'items.*.price' => ['required', 'numeric', 'min:0'],
+            'items.*.transaction_quantity' => ['nullable','numeric','gt:0'],
+            'items.*.price' => ['nullable', 'numeric', 'min:0'],
+            'items.*.customer_credit_unit_amount' => ['nullable', 'numeric', 'decimal:0,2', 'min:0'],
+            'items.*.return_to_inventory' => ['nullable', 'boolean'],
 
             'items.*.reason' => ['nullable', 'string', 'max:255'],
         ];
@@ -50,11 +57,15 @@ class StoreInvoiceReturnRequest extends FormRequest
 
           
             $invoiceId = $this->items[0]['invoice_id'];
+            if (collect($this->items)->pluck('invoice_id')->unique()->count() !== 1) {
+                $validator->errors()->add('items', 'All return lines must belong to the same sales invoice.');
+                return;
+            }
 
             $batchesInInvoice = DB::table('prod_sales')
                 ->where('sales_invoice_id', $invoiceId)
-                ->get(['batch_id', 'amount'])
-                 ->pluck('amount', 'batch_id');
+                ->get(['batch_id', 'amount', 'final_total'])
+                ->keyBy('batch_id');
 
             foreach ($this->items as $index => $item) {
               
@@ -66,17 +77,43 @@ class StoreInvoiceReturnRequest extends FormRequest
                     );
                     continue;
                 }
-                if ($item['quantity'] > $batchesInInvoice[$item['batch_id']]) {
+                $line = $batchesInInvoice[$item['batch_id']];
+                if ($item['quantity'] > $line->amount) {
                     $validator->errors()->add(
                         "items.$index.quantity",
                         "Returned quantity exceeds sold quantity."
                     );
                 }
 
+                $soldQuantity = max((int) $line->amount, 1);
+                $originalMinor = intdiv($this->moneyToMinor($line->final_total) + intdiv($soldQuantity, 2), $soldQuantity);
+                $creditMinor = array_key_exists('customer_credit_unit_amount', $item)
+                    ? $this->moneyToMinor($item['customer_credit_unit_amount'])
+                    : $originalMinor;
+                if ($creditMinor > $originalMinor) {
+                    $validator->errors()->add("items.$index.customer_credit_unit_amount", __('returns.credit_exceeds_original'));
+                }
+                $restock = filter_var($item['return_to_inventory'] ?? true, FILTER_VALIDATE_BOOL);
+                $reduced = $creditMinor < $originalMinor;
+                if (($reduced || ! $restock) && trim((string) ($item['reason'] ?? '')) === '') {
+                    $validator->errors()->add("items.$index.reason", $reduced ? __('returns.reduction_reason_required') : __('returns.no_restock_reason_required'));
+                }
+                if ($reduced && ! $this->user()?->hasPermission('sales.discount')) {
+                    $validator->errors()->add("items.$index.customer_credit_unit_amount", __('returns.reduction_not_authorized'));
+                }
+
 
 
             }
         });
+    }
+
+    private function moneyToMinor(mixed $value): int
+    {
+        $normalized = trim((string) $value);
+        if (! preg_match('/^(-?)(\d+)(?:\.(\d{1,2}))?$/', $normalized, $matches)) return PHP_INT_MAX;
+        $minor = ((int) $matches[2] * 100) + (int) str_pad($matches[3] ?? '', 2, '0');
+        return ($matches[1] ?? '') === '-' ? -$minor : $minor;
     }
 
 

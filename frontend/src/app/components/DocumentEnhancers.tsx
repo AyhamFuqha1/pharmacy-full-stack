@@ -1,0 +1,2 @@
+import { useParams } from 'react-router';import { AttachmentsSection,PrintDocumentButton } from './ErpPrimitives';
+export function DocumentEnhancers({type,attachments=false}:{type:string;attachments?:boolean}){const id=Number(useParams().id);if(!Number.isInteger(id)||id<=0)return null;return <div className="px-4 md:px-8 pb-8 space-y-4"><div className="flex justify-end"><PrintDocumentButton type={type} id={id}/></div>{attachments&&<AttachmentsSection type={type==='purchase_invoice'?'purchase':type} id={id}/>}</div>}

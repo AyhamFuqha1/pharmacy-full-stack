@@ -20,27 +20,14 @@ class CustomerController extends Controller
         $this->customerService = $customerService;
     }
 
-    public function index()
+    public function index(Request $request)
     {
         try {
-            $customers = $this->customerService->index();
-            if (!$customers) {
-                return response()->json(
-                    ["message" => "No Customer"]
-                    ,
-                    200
-                );
-            } else {
-                return response()->json(
-                    $customers,
-                    200
-                );
-            }
+            $request->validate(['archive_status' => 'nullable|in:active,archived,all', 'created_from' => 'nullable|date', 'created_to' => 'nullable|date|after_or_equal:created_from', 'sort' => 'nullable|in:id,name,created_at', 'direction' => 'nullable|in:asc,desc']);
+            return $this->collection($this->customerService->index($request), 'Customers retrieved.');
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            report($e);
+            return $this->failure('Server error.', 500);
 
         }
     }
@@ -50,34 +37,24 @@ class CustomerController extends Controller
     public function store(StoreCustomerRequest $request)
     {
         $this->customerService->store($request);
-        return response()->json([
-            'message' => 'Created',
-            'data' => $request
-        ], 201);
+        return $this->success(null, 201, 'Customer created.');
     }
 
 
     public function show($customer)
     {
         try {
-            $Customer = $this->customerService->show($customer);
+            request()->validate(['archive_status' => ['nullable', 'in:active,archived,all']]);
+            $Customer = $this->customerService->show($customer, request('archive_status', 'active'));
             if (!$Customer) {
-                return response()->json(
-                    ["message" => "This Product Not Found"],
-                    200
-                );
+                return $this->failure('Customer not found.', 404);
             } else {
 
-                return response()->json(
-                    $Customer,
-                    200
-                );
+                return $this->success($Customer, 200, 'Customer retrieved.');
             }
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            report($e);
+            return $this->failure('Server error.', 500);
 
         }
     }
@@ -87,17 +64,13 @@ class CustomerController extends Controller
         try {
             $response = $this->customerService->update($request, $customer);
             if (!$response) {
-                return response()->jsomne([
-                    'message' => "not found customer"
-                ], 404);
+                return $this->failure('Customer not found.', 404);
             }
-            return response()->json(['message' => 'Customer updated'], 200);
+            return $this->success($this->customerService->show($customer), 200, 'Customer updated.');
 
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            report($e);
+            return $this->failure('Server error.', 500);
 
         }
 
@@ -109,19 +82,23 @@ class CustomerController extends Controller
         try {
             $response = $this->customerService->destory($customer);
             if (!$response) {
-                return response()->json([
-                    'message' => "not found customer"
-                ], 404);
+                return $this->failure('Customer not found.', 404);
             }
-            return response()->json(['message' => 'Customer deactivated'], 200);
+            return $this->success(null, 200, 'Customer deactivated.');
 
         } catch (Throwable $e) {
-            return response()->json(
-                ["message" => $e->getMessage()],
-                500
-            );
+            report($e);
+            return $this->failure('Server error.', 500);
 
         }
+    }
+
+    public function restore($customer)
+    {
+        $result = $this->customerService->restore($customer);
+        return $result['status'] >= 400
+            ? $this->failure($result['message'], $result['status'])
+            : $this->success($result['data'], 200, $result['message']);
     }
 
     public function incrementDept($id, $amount, $id_sales_invoices)

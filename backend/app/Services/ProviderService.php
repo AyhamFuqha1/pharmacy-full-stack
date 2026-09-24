@@ -6,14 +6,33 @@ use DB;
 
 class ProviderService
 {
-    public function index()
+    public function index($request = null)
     {
-        return DB::table('providers')->get();
+        $query = DB::table('providers');
+        $this->applyArchiveStatus($query, $request?->input('archive_status', 'active'));
+        if ($request?->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(fn ($builder) => $builder
+                ->where('name', 'like', "%{$search}%")
+                ->orWhere('phone_num', 'like', "%{$search}%"));
+        }
+        $query->when($request?->filled('name'), fn ($q) => $q->where('name', 'like', '%'.$request->name.'%'))
+            ->when($request?->filled('phone'), fn ($q) => $q->where('phone_num', 'like', '%'.$request->phone.'%'))
+            ->when($request?->filled('city'), fn ($q) => $q->where('city', 'like', '%'.$request->city.'%'))
+            ->when($request?->filled('created_from'), fn ($q) => $q->whereDate('created_at', '>=', $request->created_from))
+            ->when($request?->filled('created_to'), fn ($q) => $q->whereDate('created_at', '<=', $request->created_to));
+
+        $sort = in_array($request?->input('sort'), ['id', 'name', 'created_at'], true) ? $request->sort : 'id';
+        return $query->orderBy($sort, $request?->input('direction') === 'asc' ? 'asc' : 'desc')->paginate(min(max((int) ($request?->input('per_page', 15) ?? 15), 1), 100));
     }
 
-    public function show($id)
+    public function show($id, string $archiveStatus = 'active')
     {
-        return DB::table('providers')->where('id', $id)->first();
+        return DB::table('providers')
+            ->where('id', $id)
+            ->when($archiveStatus === 'active', fn ($query) => $query->whereNull('deleted_at'))
+            ->when($archiveStatus === 'archived', fn ($query) => $query->whereNotNull('deleted_at'))
+            ->first();
     }
 
     public function store($request)
@@ -24,19 +43,7 @@ class ProviderService
                 'phone_num' => $request['phone_num'],
                 'city' => $request['city'],
             ]);
-            if ($request->filled('dept')) {
-                DB::table('ledgers')->insert([
-                    'party_type' => 'supplier',
-                    'party_id' => $id,
-                    'transaction_type' => 'debit',
-                    'amount' => $request->dept,
-                    'source_type' => 'purchase',
-                    'source_id' => 0,
-                    'description' => "Opening balance for provider",
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            }
+            // Supplier balances are derived from posted journal entries.
             return true;
         });
 
@@ -46,7 +53,10 @@ class ProviderService
     public function update($request, $id)
     {
         return DB::transaction(function () use ($request, $id) {
-            $provider = DB::table('providers')->where('id', $id)->first();
+            $provider = DB::table('providers')
+                ->where('id', $id)
+                ->whereNull('deleted_at')
+                ->first();
             if (!$provider)
                 return false;
             DB::table('providers')->where('id', $id)->update($request->validated());
@@ -57,7 +67,10 @@ class ProviderService
 
     public function destroy($id)
     {
-        $provider = DB::table('providers')->where('id', $id)->first();
+        $provider = DB::table('providers')
+            ->where('id', $id)
+            ->whereNull('deleted_at')
+            ->first();
         if (!$provider)
             return false;
 
@@ -65,49 +78,30 @@ class ProviderService
         return true;
     }
 
+    public function restore($id): array
+    {
+        $provider = DB::table('providers')->where('id', $id)->first();
+        if (!$provider) return ['message' => 'Provider not found.', 'status' => 404];
+        if ($provider->deleted_at === null) return ['message' => 'Provider is already active.', 'status' => 409];
+        DB::table('providers')->where('id', $id)->update(['deleted_at' => null]);
+        return ['message' => 'Provider restored.', 'status' => 200, 'data' => $this->show($id)];
+    }
+
+    private function applyArchiveStatus($query, string $status): void
+    {
+        if ($status === 'active') $query->whereNull('deleted_at');
+        if ($status === 'archived') $query->whereNotNull('deleted_at');
+    }
+
     // Purchase on credit → we owe supplier
     public function incrementDept($id, $amount, $purchaseId)
     {
-        $provider = DB::table('providers')->where('id', $id)->first();
-        if (!$provider)
-            return false;
-
-        DB::table('providers')->where('id', $id)->increment('dept', $amount);
-
-        DB::table('ledgers')->insert([
-            'party_type' => 'supplier',
-            'party_id' => $provider->id,
-            'transaction_type' => 'debit',
-            'amount' => $amount,
-            'source_type' => 'purchase',
-            'source_id' => $purchaseId,
-            'description' => "Amount owed for purchase #{$purchaseId}",
-            'created_at' => now(),
-            'updated_at' => now()
-        ]);
-        return true;
+        throw new \LogicException('Supplier balances are posted only through purchases and payments.');
     }
 
     // Paying supplier
     public function decrementDept($id, $amount, $purchaseId)
     {
-        $provider = DB::table('providers')->where('id', $id)->first();
-        if (!$provider)
-            return false;
-
-        DB::table('providers')->where('id', $id)->decrement('dept', $amount);
-
-        DB::table('ledgers')->insert([
-            'party_type' => 'supplier',
-            'party_id' => $provider->id,
-            'transaction_type' => 'credit',
-            'amount' => $amount,
-            'source_type' => 'payment',
-            'source_id' => $purchaseId,
-            'description' => "Payment sent for purchase #{$purchaseId}",
-            'created_at' => now(),
-            'updated_at' => now()
-        ]);
-        return true;
+        throw new \LogicException('Supplier balances are posted only through purchases and payments.');
     }
 }

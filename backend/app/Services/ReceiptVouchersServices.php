@@ -2,100 +2,44 @@
 
 namespace App\Services;
 
-use DB;
-
-const PAYMENT = "receipt_vouchers";
+use Illuminate\Support\Facades\DB;
 
 class ReceiptVouchersServices
 {
-    public function index()
-    {
-        return DB::table(PAYMENT)->get();
-    }
-    public function show($id)
-    {
-        return DB::table(PAYMENT)->where('id', $id)->first();
-    }
-    public function store($payment)
-    {
-        return DB::transaction(function () use ($payment) {
+    public function index() { return DB::table('receipt_vouchers')->get(); }
+    public function show($id) { return DB::table('receipt_vouchers')->where('id', $id)->first(); }
 
-            $payment_id = DB::table(PAYMENT)->insertGetId([...$payment, "status" => "posted"]);
-            DB::table('ledgers')->insert([
-                "party_type" => "customer",
-                "party_id" => $payment['customer_id'],
-                "transaction_type" => "credit",
-                "amount" => $payment['amount'],
-                "source_type" => "receipt-vouchers",
-                "source_id" => $payment_id,
-                "description" => "receipt_vouchers"
+    public function store($receipt, $user = null): int
+    {
+        return DB::transaction(function () use ($receipt, $user) {
+            $id = DB::table('receipt_vouchers')->insertGetId([
+                'document_number' => app(DocumentNumberService::class)->next('receipt','REC'),
+                'customer_id' => $receipt['customer_id'], 'user_id' => ($user ?? auth()->user())->id,
+                'amount' => $receipt['amount'], 'payment_method' => $receipt['payment_method'], 'date' => $receipt['date'], 'status' => 'posted',
             ]);
-            DB::table('ledgers')->insert([
-                'party_type' => $payment['party_type'],
-                'party_id' => $payment['party_id'],
-                'transaction_type' => 'debit',
-                'amount' => $payment['amount'],
-                'source_type' => 'receipt_vouchers',
-                'source_id' => $payment_id,
-            ]);
-            if ($payment['party_type'] === "cash") {
-                DB::table('cash_accounts')
-                    ->where('id', $payment['party_id'])
-                    ->increment('balance', $payment['amount']);
-            } else if ($payment['party_type'] === "bank") {
-                DB::table('bank_accounts')
-                    ->where('id', $payment['party_id'])
-                    ->increment('balance', $payment['amount']);
+            if ($receipt['payment_method'] === 'cheque') {
+                app(ChequeService::class)->createLinked([
+                    'cheque_number' => $receipt['cheque_number'], 'bank' => $receipt['bank'], 'due_date' => $receipt['due_date'],
+                    'amount' => $receipt['amount'], 'direction' => 'incoming', 'customer_id' => $receipt['customer_id'], 'receipt_voucher_id' => $id,
+                ]);
             }
-
-            DB::table('customers')
-                ->where('id', $payment['customer_id'])
-                ->decrement('dept', $payment['amount']);
-            return $payment_id;
+            app(AccountingPostingService::class)->postReceiptVoucher($id);
+            app(SettlementAllocationService::class)->allocateReceipt($id, $receipt['allocations'] ?? [], ($user ?? auth()->user())->id);
+            app(PrintIdentityService::class)->capture('customer_receipt', $id);
+            return $id;
         });
     }
 
-
-    public function destroy($id)
+    public function destroy($id, $user = null): bool
     {
-        return DB::transaction(function () use ($id) {
-            $payment = DB::table(PAYMENT)->where('id', $id)->first();
-            if ($payment->status === 'cancelled') {
-                return false;
-            }
-            DB::table(PAYMENT)->where("id", $id)->update(["status" => "cancelled"]);
-            DB::table('ledgers')->insert([
-                "party_type" => "customer",
-                "party_id" => $payment->customer_id,
-                "transaction_type" => "debit",
-                "amount" => $payment->amount,
-                "source_type" => "receipt-vouchers",
-                "source_id" => $id,
-                "description" => "retutn_receipt_vouchers"
-            ]);
-            DB::table('ledgers')->insert([
-                'party_type' => $payment->party_type,
-                'party_id' => $payment->party_id,
-                'transaction_type' => 'credit',
-                'amount' => $payment->amount,
-                'source_type' => 'retutn_receipt_vouchers',
-                'source_id' => $id
-            ]);
-            if ($payment->party_type === "cash") {
-                DB::table('cash_accounts')
-                    ->where('id', $payment->party_id)
-                    ->decrement('balance', $payment->amount);
-            } else if ($payment->party_type === "bank") {
-                DB::table('bank_accounts')
-                    ->where('id', $payment->party_id)
-                    ->decrement('balance', $payment->amount);
-            }
-
-            DB::table('customers')
-                ->where('id', $payment->customer_id)
-                ->increment('dept', $payment->amount);
-            return $payment;
+        return DB::transaction(function () use ($id, $user) {
+            $receipt = DB::table('receipt_vouchers')->where('id', $id)->lockForUpdate()->first();
+            if (!$receipt || $receipt->status === 'cancelled') return false;
+            if (DB::table('checks')->where('receipt_voucher_id', $id)->exists()) return false;
+            app(AccountingPostingService::class)->reverseEvent('receipt', $receipt->id, $receipt->date, ($user ?? auth()->user())->id, 'Receipt voucher cancellation');
+            app(SettlementAllocationService::class)->remove('receipt', $receipt->id);
+            DB::table('receipt_vouchers')->where('id', $id)->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+            return true;
         });
     }
-
 }

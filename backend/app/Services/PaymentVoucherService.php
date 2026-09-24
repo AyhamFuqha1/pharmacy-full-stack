@@ -2,89 +2,44 @@
 
 namespace App\Services;
 
-use DB;
+use Illuminate\Support\Facades\DB;
 
-const PAYMENT = 'payment_vouchers';
 class PaymentVoucherService
 {
-    public function index()
-    {
-        return DB::table(PAYMENT)->get();
-    }
-    public function show($id)
-    {
-        return DB::table(PAYMENT)->where('id', $id)->first();
-    }
-    public function store($payment)
-    {
-        return DB::transaction(function () use ($payment) {
+    public function index() { return DB::table('payment_vouchers')->get(); }
+    public function show($id) { return DB::table('payment_vouchers')->where('id', $id)->first(); }
 
-            $payment_id = DB::table(PAYMENT)->insertGetId([...$payment,'status'=>"posted"]);
-            DB::table('ledgers')->insert([
-                "party_type" => "provider",
-                "party_id" => $payment['provider_id'],
-                "transaction_type" => "debit",
-                "amount" => $payment['amount'],
-                "source_type" => "payment_voucher",
-                "source_id" => $payment_id,
-                "description" => "payment_voucher"
-            ]);
-            DB::table('ledgers')->insert([
-                'party_type' => 'cash',
-                'party_id' => $payment['cash_id'],
-                'transaction_type' => 'credit',
-                'amount' => $payment['amount'],
-                'source_type' => 'payment_voucher',
-                'source_id' => $payment['cash_id'],
-            ]);
-            DB::table('cash_accounts')
-                ->where('id', $payment['cash_id'])
-                ->decrement('balance', $payment['amount']);
-
-            DB::table('providers')
-                ->where('id', $payment['provider_id'])
-                ->decrement('dept', $payment['amount']);
-            return $payment_id;
-        });
-    }
-    public function destroy($id)
+    public function store($payment, $user = null): int
     {
-        return DB::transaction(function () use ($id) {
-            $payment = DB::table(PAYMENT)->where('id', $id)->first();
-            if (!$payment || $payment->status === "canceled") {
-                return false;
+        return DB::transaction(function () use ($payment, $user) {
+            $id = DB::table('payment_vouchers')->insertGetId([
+                'document_number' => app(DocumentNumberService::class)->next('payment','PAY'),
+                'provider_id' => $payment['provider_id'], 'user_id' => ($user ?? auth()->user())->id,
+                'amount' => $payment['amount'], 'payment_method' => $payment['payment_method'], 'date' => $payment['date'], 'status' => 'posted',
+            ]);
+            if ($payment['payment_method'] === 'cheque') {
+                app(ChequeService::class)->createLinked([
+                    'cheque_number' => $payment['cheque_number'], 'bank' => $payment['bank'], 'due_date' => $payment['due_date'],
+                    'amount' => $payment['amount'], 'direction' => 'outgoing', 'provider_id' => $payment['provider_id'], 'payment_voucher_id' => $id,
+                ]);
             }
-            DB::table('ledgers')->insert([
-                "party_type" => "provider",
-                "party_id" => $payment->provider_id,
-                "transaction_type" => "credit",
-                "amount" => $payment->amount,
-                "source_type" => "payment_voucher",
-                "source_id" => $id,
-                "description" => "payment_voucher"
-            ]);
-            DB::table('ledgers')->insert([
-                'party_type' => 'cash',
-                'party_id' => $payment->cash_id,
-                'transaction_type' => 'debit',
-                'amount' => $payment->amount,
-                'source_type' => 'payment_voucher',
-                'source_id' => $id,
-            ]);
-            DB::table('cash_accounts')
-                ->where('id', $payment->cash_id)
-                ->increment('balance', $payment->amount);
-
-            DB::table('providers')
-                ->where('id', $payment->provider_id)
-                ->increment('dept', $payment->amount);
-
-            DB::table(PAYMENT)->where('id', $id)->update([
-                'status' => "cancelled"
-            ]);
+            app(AccountingPostingService::class)->postPaymentVoucher($id);
+            app(SettlementAllocationService::class)->allocatePayment($id, $payment['allocations'] ?? [], ($user ?? auth()->user())->id);
+            app(PrintIdentityService::class)->capture('supplier_payment', $id);
             return $id;
         });
+    }
 
-
+    public function destroy($id, $user = null): bool
+    {
+        return DB::transaction(function () use ($id, $user) {
+            $payment = DB::table('payment_vouchers')->where('id', $id)->lockForUpdate()->first();
+            if (!$payment || $payment->status === 'cancelled') return false;
+            if (DB::table('checks')->where('payment_voucher_id', $id)->exists()) return false;
+            app(AccountingPostingService::class)->reverseEvent('payment', $payment->id, $payment->date, ($user ?? auth()->user())->id, 'Payment voucher cancellation');
+            app(SettlementAllocationService::class)->remove('payment', $payment->id);
+            DB::table('payment_vouchers')->where('id', $id)->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+            return true;
+        });
     }
 }
